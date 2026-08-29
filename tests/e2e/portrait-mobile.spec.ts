@@ -35,4 +35,48 @@ test.describe("iPhone portrait gameplay", () => {
     expect(state.paused).toBe(false);
     expect(state.resumeRequired).toBe(false);
   });
+
+  test("rotation clears held pointers without blocking portrait gameplay", async ({ page }) => {
+    await page.setViewportSize({ width: 852, height: 393 });
+    await page.goto("/?p1-probe=1");
+    await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
+
+    const moveBox = await page.getByTestId("joystick-zone").boundingBox();
+    const cameraBox = await page.getByTestId("camera-zone").boundingBox();
+    if (!moveBox || !cameraBox) throw new Error("controls are not measurable");
+
+    await page.getByTestId("joystick-zone").dispatchEvent("pointerdown", {
+      pointerId: 301,
+      pointerType: "touch",
+      button: 0,
+      buttons: 1,
+      clientX: moveBox.x + 90,
+      clientY: moveBox.y + 120,
+      bubbles: true,
+      cancelable: true,
+    });
+    await page.getByTestId("camera-zone").dispatchEvent("pointerdown", {
+      pointerId: 302,
+      pointerType: "touch",
+      button: 0,
+      buttons: 1,
+      clientX: cameraBox.x + cameraBox.width * 0.55,
+      clientY: cameraBox.y + 100,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    await expect.poll(async () => page.evaluate(() => window.__OITATE_P1__.getState().owners))
+      .toEqual({ movement: 301, camera: 302, guidance: null, threat: null });
+
+    await page.setViewportSize({ width: 393, height: 852 });
+
+    await expect.poll(async () => page.evaluate(() => window.__OITATE_P1__.getState().owners))
+      .toEqual({ movement: null, camera: null, guidance: null, threat: null });
+    await expect(page.locator("#orientation-overlay")).toBeHidden();
+
+    const portraitState = await page.evaluate(() => window.__OITATE_P1__.getState());
+    expect(portraitState.paused).toBe(false);
+    expect(portraitState.resumeRequired).toBe(false);
+  });
 });
