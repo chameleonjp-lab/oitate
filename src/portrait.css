@@ -1,0 +1,182 @@
+@media (orientation: portrait) {
+  .p1-shell {
+    min-height: 100dvh;
+  }
+
+  .top-bar {
+    padding: calc(env(safe-area-inset-top) + 8px)
+      calc(env(safe-area-inset-right) + 10px) 0
+      calc(env(safe-area-inset-left) + 10px);
+  }
+
+  .top-bar h1 {
+    max-width: 58vw;
+    font-size: clamp(13px, 4vw, 18px);
+  }
+
+  .top-actions {
+    gap: 6px;
+  }
+
+  .icon-button {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .p2-status,
+  .p4-status,
+  .p5-status,
+  .p6-status,
+  .p7-status {
+    top: calc(env(safe-area-inset-top) + 64px);
+    left: calc(env(safe-area-inset-left) + 10px);
+    right: calc(env(safe-area-inset-right) + 10px);
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    padding: 7px 9px;
+    font-size: 9px;
+    line-height: 1.3;
+    text-align: left;
+    transform: none;
+  }
+
+  .p2-status strong,
+  .p4-status strong,
+  .p5-status strong,
+  .p6-status strong,
+  .p7-status strong {
+    font-size: 10px;
+  }
+
+  .diagnostics {
+    top: calc(env(safe-area-inset-top) + 118px);
+    left: calc(env(safe-area-inset-left) + 10px);
+    right: calc(env(safe-area-inset-right) + 10px);
+    max-width: none;
+    grid-template-columns: 1fr 1fr;
+    font-size: 8px;
+  }
+
+  .joystick-zone,
+  .camera-zone {
+    bottom: 0;
+    height: 48%;
+  }
+
+  .joystick-zone {
+    left: 0;
+    width: 50%;
+  }
+
+  .camera-zone {
+    right: 0;
+    width: 50%;
+  }
+
+  .zone-hint {
+    left: calc(env(safe-area-inset-left) + 14px);
+    bottom: calc(env(safe-area-inset-bottom) + 18px);
+  }
+
+  .joystick-base {
+    width: 104px;
+    height: 104px;
+  }
+
+  .signal-controls,
+  .p4-controls,
+  .p5-controls {
+    right: calc(env(safe-area-inset-right) + 12px);
+    bottom: calc(env(safe-area-inset-bottom) + 14px);
+    gap: 8px;
+  }
+
+  .signal-controls,
+  .p5-controls {
+    flex-direction: column;
+  }
+
+  .signal-note,
+  .p4-control-note,
+  .p5-control-note {
+    display: none;
+  }
+
+  .signal-button,
+  .p5-signal-button {
+    width: 62px;
+    height: 62px;
+  }
+
+  .signal-button > span,
+  .p5-signal-button > span {
+    font-size: 21px;
+  }
+
+  .p4-threat-button {
+    width: 68px;
+    height: 68px;
+  }
+
+  .p4-threat-button > span {
+    font-size: 26px;
+  }
+
+  .signal-feedback {
+    top: 42%;
+    max-width: calc(100vw - 28px);
+    text-align: center;
+  }
+
+  .world-label {
+    font-size: 9px;
+  }
+
+  .animal-label {
+    top: 31%;
+  }
+
+  .player-label {
+    bottom: 37%;
+  }
+
+  .blocking-overlay {
+    align-items: center;
+    overflow-y: auto;
+  }
+
+  .overlay-card,
+  .p6-intro-card,
+  .p6-settings-card,
+  .p6-result-card {
+    width: min(94vw, 560px);
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px);
+    padding: 18px;
+    overflow-y: auto;
+  }
+
+  .overlay-card h2 {
+    font-size: clamp(19px, 6vw, 26px);
+  }
+
+  .overlay-card p:not(.eyebrow) {
+    margin-bottom: 14px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .p6-intro-step {
+    padding: 7px 8px;
+    font-size: 11px;
+  }
+
+  .p6-score-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .p7-stage-list {
+    grid-template-columns: 1fr;
+  }
+}

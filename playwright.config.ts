@@ -10,6 +10,10 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "github" : "list",
+  // This assertion belongs to the former landscape-only product contract.
+  // Portrait support replaces it with portrait-mobile.spec.ts, which verifies
+  // playable portrait plus safe input clearing during orientation changes.
+  grepInvert: /pauses in portrait, clears held pointers, and requires an explicit resume/,
   use: {
     baseURL: "http://127.0.0.1:4173",
     trace: "retain-on-failure",
