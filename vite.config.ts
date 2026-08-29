@@ -20,12 +20,12 @@ function stabilizeGameplayFoundation(): Plugin {
     enforce: "pre",
     transform(code, id) {
       if (id.endsWith("/src/main.ts")) {
-        const from = `      snapshot.movementBasisYaw,`;
-        const to = `      // Use the camera direction the player actually sees. The camera orbit\n      // eases toward its target, so the requested yaw can temporarily differ\n      // from the rendered view and make forward input feel reversed.\n      Math.atan2(\n        cameraTarget.x - camera.position.x,\n        -(cameraTarget.z - camera.position.z),\n      ),`;
-        if (!code.includes(from)) {
-          throw new Error("movement camera-basis patch target is missing");
+        const cameraFrom = `  const cameraFollow = 1 - Math.exp(-Math.min(renderDeltaSeconds, 0.25) * 9);\n  camera.position.lerp(desiredCameraPosition, cameraFollow);\n  camera.lookAt(cameraTarget);`;
+        const cameraTo = `  const cameraFollow = 1 - Math.exp(-Math.min(renderDeltaSeconds, 0.25) * 9);\n  // Camera yaw is part of the movement contract. Snap the horizontal orbit to\n  // the requested yaw so the direction visible on screen and the direction\n  // used by held movement cannot disagree after a fast camera turn. Keep the\n  // vertical follow eased so the camera still feels smooth.\n  camera.position.x = desiredCameraPosition.x;\n  camera.position.z = desiredCameraPosition.z;\n  camera.position.y = THREE.MathUtils.lerp(\n    camera.position.y,\n    desiredCameraPosition.y,\n    cameraFollow,\n  );\n  camera.lookAt(cameraTarget);`;
+        if (!code.includes(cameraFrom)) {
+          throw new Error("rendered camera synchronization patch target is missing");
         }
-        return { code: code.replace(from, to), map: null };
+        return { code: code.replace(cameraFrom, cameraTo), map: null };
       }
 
       if (id.endsWith("/src/game/p3-cowardly-simulation.ts")) {
