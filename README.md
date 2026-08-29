@@ -16,23 +16,26 @@
 | 技術選定、構成、性能、基本実装順 | [実装計画書](docs/IMPLEMENTATION_PLAN.md) |
 | 1.0完成までの現在差分 | [1.0完成ギャップ台帳](docs/ONE_ZERO_COMPLETION_GAP_LEDGER.md) |
 
-節目ごとの固定値と実装対応は、[P2正式仕様](docs/P2_FORMAL_SPEC.md) / [P2実装契約](docs/P2_IMPLEMENTATION_CONTRACT.md)、[P3正式仕様](docs/P3_FORMAL_SPEC.md) / [P3実装契約](docs/P3_IMPLEMENTATION_CONTRACT.md)、[P4正式仕様](docs/P4_FORMAL_SPEC.md) / [P4実装契約](docs/P4_IMPLEMENTATION_CONTRACT.md)、[P5正式仕様](docs/P5_FORMAL_SPEC.md) / [P5実装契約](docs/P5_IMPLEMENTATION_CONTRACT.md)、[P6正式仕様](docs/P6_FORMAL_SPEC.md) / [P6実装契約](docs/P6_IMPLEMENTATION_CONTRACT.md)を参照します。P3の初見・再現確認票は[P3プレイテスト](docs/P3_PLAYTEST.md)、P4の危険種確認票は[P4プレイテスト](docs/P4_PLAYTEST.md)、P5の統合確認票は[P5プレイテスト](docs/P5_PLAYTEST.md)、P6の完成版確認票は[P6プレイテスト](docs/P6_PLAYTEST.md)です。
-
-同じ分野で記述が食い違った場合は、表に示した正式な文書を優先します。標準実装組織は担当、承認操作、進行手続を定め、ゲーム仕様は上書きしません。プロデューサー統括計画は、現在の「最小版」を縦切り完成版として整理し、面白さを確認する小さな試作、制作を止める条件、1.0の上限、公開品質と公開可否の判断基準を定めています。
-
-標準実装組織はOITATEで必須とし、今後のブラウザゲーム開発でも初期設定として再利用します。AIが実際に作業するときの入口は、リポジトリ直下の`AGENTS.md`です。
-
 ## 現在の状態
 
 P7「1.0内容完成」のゲーム機能、P8の公開候補基盤、GitHub Pages公開、Chromium/WebKit自動確認まで`main`へマージ済みです。公開URLは `https://chameleonjp-lab.github.io/oitate/` です。
 
-最新の確認基準はPR #32マージ後の`main`です。PR #30〜#32では、Safari空白表示対策、WebKit CI、カメラ旋回時の進行方向ずれ、収容後の羊の高速振動、羊の停止・ワールド端回避判定を修正し、回帰試験を追加しています。
+ゲーム本体は練習＋6面、3種類の動物、接近圧力・誘導音・威嚇音、危険種・救助、4項目得点、結果・記録・保存まで実装済みです。PR #30〜#32ではSafari空白表示対策、WebKit CI、カメラ旋回時の進行方向ずれ、収容後の羊の高速振動、羊の停止・ワールド端回避判定を修正し、回帰試験を追加しています。
 
-ゲーム本体は練習＋6面、3種類の動物、接近圧力・誘導音・威嚇音、危険種・救助、4項目得点、結果・記録・保存まで実装済みです。ただし、当初計画で進行条件としていたP1〜P7の人手受入、初見理解、再挑戦・改善、対象端末の実機性能は十分に記録されていません。自動CIの成功をこれらの証拠へ読み替えません。
+### 1.0の実機基準
 
-現在は[1.0完成ギャップ台帳](docs/ONE_ZERO_COMPLETION_GAP_LEDGER.md)を基準に、P1〜P7の未確認条件を現在の統合版でまとめて確認し、その後P8-G対象端末証拠、P8-H紹介動画・最終権利照合、P8-I最終独立レビューへ進みます。
+ユーザー判断により、**OITATE 1.0の正式な実機受入はiPhone 17 Pro 1台で実施します。**
 
-GitHub Pagesはpublic公開済みですが、これは当初計画上の「1.0完成判定」が完了したことを意味しません。公開後に実機で見つかった不具合も、可能な限り自動回帰試験へ固定します。
+- 必須端末: iPhone 17 Pro
+- 必須ブラウザ: Safari
+- 基本向き: 横画面
+- iPhone 11 Pro、iPad Pro 2018、PCは1.0の必須検証対象外
+
+対象外の環境を未確認のため1.0未完成とは扱いません。ただし、それらを動作確認済み・正式対応済みとも表現しません。
+
+現在は[1.0完成ギャップ台帳](docs/ONE_ZERO_COMPLETION_GAP_LEDGER.md)を基準に、iPhone 17 ProでP1〜P7の未確認条件を現在の統合版でまとめて確認します。その後、P8-G実機証拠、P8-H紹介動画・最終権利照合、P8-I最終独立レビューへ進みます。
+
+GitHub Pagesはpublic公開済みですが、これは当初計画上の「1.0完成判定」が完了したことを意味しません。自動CIの成功を人手受入・実機性能の証拠へ読み替えません。
 
 ### 開発用コマンド
 
@@ -56,10 +59,9 @@ npm run capture:p8-media
 - [P8開発時診断の使い方](docs/P8_DIAGNOSTICS.md)
 - [P8公開前監査の使い方](docs/P8_PUBLIC_AUDIT.md)
 - [P8実ゲーム画面の撮影手順](docs/P8_MEDIA_CAPTURE.md)
-- [P8-Dマージ後フォローアップ計画](docs/P8_POST_MERGE_PLAN.md)
-- [P8-F 手動・初見・実機確認マトリクス](docs/P8_MANUAL_ACCEPTANCE_MATRIX.md)
 - [P8-F 手動受入 実行手順](docs/P8F_MANUAL_TEST_RUNBOOK.md)
 - [P8-F 記録テンプレート](docs/P8F_EVIDENCE_TEMPLATE.md)
-- [P8-G対象端末証拠仕様](docs/P8G_DEVICE_EVIDENCE_SPEC.md)
+- [P8-G iPhone 17 Pro実機証拠仕様](docs/P8G_DEVICE_EVIDENCE_SPEC.md)
+- [P8-G 実機証拠テンプレート](docs/P8G_DEVICE_EVIDENCE_TEMPLATE.md)
 - [P8-H紹介動画・権利最終確認](docs/P8H_RELEASE_CHECKLIST.md)
 - [公開候補ページ](public/candidate.html)
