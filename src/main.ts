@@ -306,6 +306,128 @@ interface P8DiagnosticApi {
   download: () => void;
 }
 
+const SUPABASE_URL = "https://mlpnjgezrnhdxsxolyzj.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_drzcy0v97knU6FgjqSgBHw_0A9XPdFM";
+const GAME_SLUG = "oitate";
+const CLIENT_VERSION = "oitate-2026-08-31-platform";
+const LAB_URL = "https://chameleonjp-lab.github.io/chameleonjp_lab/";
+const PLAYER_NAME_KEY = "oitate.player-name";
+
+interface OnlineRankingRow {
+  name: string;
+  score: number;
+}
+
+function cleanPlayerName(value: string): string {
+  return value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 20);
+}
+
+function readPlayerName(): string {
+  try {
+    return cleanPlayerName(localStorage.getItem(PLAYER_NAME_KEY) ?? "");
+  } catch {
+    return "";
+  }
+}
+
+function savePlayerName(value: string): string {
+  const name = cleanPlayerName(value);
+  try {
+    if (name) localStorage.setItem(PLAYER_NAME_KEY, name);
+    else localStorage.removeItem(PLAYER_NAME_KEY);
+  } catch {
+    // Keep the current-session value even when storage is unavailable.
+  }
+  return name;
+}
+
+function currentGameUrl(): string {
+  return new URL(window.location.href).toString().split("#")[0] ?? window.location.href;
+}
+
+function homeShareMessage(): string {
+  return `OITATEで、動物の性質を読んで囲いへ導こう！\n${currentGameUrl()}\n#OITATE #カメレオンJP #ミニゲーム`;
+}
+
+async function shareOrCopy(
+  text: string,
+  statusElement: HTMLElement,
+  title = "OITATE",
+): Promise<void> {
+  statusElement.textContent = "";
+  if (navigator.share) {
+    try {
+      await navigator.share({ title, text });
+      statusElement.textContent = "共有しました。";
+      return;
+    } catch (error: unknown) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+    }
+  }
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+    await navigator.clipboard.writeText(text);
+    statusElement.textContent = "シェア文をコピーしました。";
+  } catch {
+    statusElement.textContent = "コピーできませんでした。下のシェア文を長押ししてコピーしてください。";
+  }
+}
+
+async function callRankingRpc(
+  functionName: string,
+  payload: Record<string, unknown>,
+): Promise<unknown> {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${functionName}`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_PUBLISHABLE_KEY,
+      Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const body = await response.text();
+  let data: unknown = null;
+  try {
+    data = body ? JSON.parse(body) : null;
+  } catch {
+    data = body;
+  }
+  if (!response.ok) throw new Error(`${functionName}: ${response.status}`);
+  return data;
+}
+
+function normalizeRanking(data: unknown): OnlineRankingRow[] {
+  if (!Array.isArray(data)) return [];
+  return data.flatMap((item): OnlineRankingRow[] => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    const name = cleanPlayerName(String(row.display_name ?? row.player_name ?? row.name ?? ""));
+    const score = Number(row.score);
+    return name && Number.isFinite(score) ? [{ name, score }] : [];
+  });
+}
+
+function renderRanking(list: HTMLElement, status: HTMLElement, rows: OnlineRankingRow[]): void {
+  list.replaceChildren();
+  if (rows.length === 0) {
+    status.textContent = "まだ公開記録はありません。最初のクリアを目指そう。";
+    return;
+  }
+  status.textContent = `現在の上位${rows.length}名（最大10名）`;
+  rows.slice(0, 10).forEach((row, index) => {
+    const item = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = row.name;
+    const score = document.createElement("strong");
+    score.textContent = `${row.score.toLocaleString("ja-JP")}点`;
+    item.append(document.createTextNode(`${index + 1}. `), name, score);
+    list.append(item);
+  });
+}
+
+let playerName = readPlayerName();
+
 interface P3PublicApi {
   getState: () => P3PublicState;
   retry: () => void;
@@ -497,11 +619,35 @@ root.innerHTML = `
       </div>
     </section>
 
+    <section class="blocking-overlay public-start-overlay" id="public-start-overlay" role="dialog" aria-modal="true" aria-labelledby="public-start-title" tabindex="-1" hidden>
+      <div class="overlay-card public-start-card">
+        <p class="eyebrow">OITATE｜PLAYER START</p>
+        <h2 id="public-start-title">動物を囲いへ導く</h2>
+        <p>ランキングに表示する名前を入力してからゲームを始めます。</p>
+        <div class="player-name-panel">
+          <label for="public-player-name">ランキング表示名（必須）</label>
+          <input id="public-player-name" type="text" maxlength="20" autocomplete="name" placeholder="20文字以内で入力" required />
+          <small id="public-player-name-status" class="platform-status" role="status" aria-live="polite">名前を入力すると開始できます。</small>
+        </div>
+        <div class="platform-actions">
+          <button class="resume-button" id="public-start-button" type="button">ゲームを始める</button>
+          <button class="text-button platform-action-button" id="public-home-share" type="button">シェアする</button>
+          <a class="platform-link" href="${LAB_URL}" target="_blank" rel="noopener noreferrer">カメレオンJPの実験場</a>
+        </div>
+        <p id="public-home-share-status" class="platform-status" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+
     <section class="blocking-overlay p6-overlay" id="p6-intro-overlay" role="dialog" aria-modal="true" aria-labelledby="p6-intro-title" tabindex="-1" hidden>
       <div class="overlay-card p6-intro-card">
         <p class="eyebrow">P6 縦切り完成版</p>
         <h2 id="p6-intro-title">動物を直接命令せず、囲いへ導きます</h2>
         <p id="p6-intro-lead">最初の1回だけ、4つの反応を短く確認します。説明はいつでも飛ばせます。</p>
+        <div class="player-name-panel">
+          <label for="p6-player-name">ランキング表示名（必須）</label>
+          <input id="p6-player-name" type="text" maxlength="20" autocomplete="name" placeholder="20文字以内で入力" required />
+          <small id="p6-player-name-status" class="platform-status" role="status" aria-live="polite">名前を入力すると開始できます。</small>
+        </div>
         <div class="p6-intro-steps" aria-label="初回説明">
           <div class="p6-intro-step"><b>1</b><span>左で主人公、右でカメラを動かします。</span></div>
           <div class="p6-intro-step"><b>2</b><span>臆病種の後ろへ立つと、反対へ動きます。</span></div>
@@ -510,7 +656,10 @@ root.innerHTML = `
         <div class="p6-intro-actions">
           <button class="resume-button" type="button" data-action="p6-start">説明を確認して始める</button>
           <button class="text-button" type="button" data-action="p6-skip-intro">説明を飛ばして始める</button>
+          <button class="text-button platform-action-button" id="p6-home-share" type="button">シェアする</button>
+          <a class="platform-link" href="${LAB_URL}" target="_blank" rel="noopener noreferrer">カメレオンJPの実験場</a>
         </div>
+        <p id="p6-home-share-status" class="platform-status" role="status" aria-live="polite"></p>
       </div>
     </section>
 
@@ -519,9 +668,19 @@ root.innerHTML = `
         <p class="eyebrow">P7 1.0 内容完成</p>
         <h2 id="p7-stage-menu-title">遊ぶ面を選ぶ</h2>
         <p id="p7-stage-menu-summary">面ごとに一つの中心概念を確認します。クリアすると次の面が開きます。</p>
+        <div class="player-name-panel">
+          <label for="p7-player-name">ランキング表示名（必須）</label>
+          <input id="p7-player-name" type="text" maxlength="20" autocomplete="name" placeholder="20文字以内で入力" required />
+          <small id="p7-player-name-status" class="platform-status" role="status" aria-live="polite">名前を入力すると面を開始できます。</small>
+        </div>
         <div id="p7-stage-list" class="p7-stage-list" aria-label="P7の面一覧"></div>
         <p id="p7-fourth-gate" class="p7-fourth-gate">第4の動物：6面の受入確認後に検証</p>
-        <button class="text-button" type="button" data-action="p7-menu-close" hidden>ゲームへ戻る</button>
+        <div class="platform-actions">
+          <button class="text-button" type="button" data-action="p7-menu-close" hidden>ゲームへ戻る</button>
+          <button class="text-button platform-action-button" id="p7-home-share" type="button">シェアする</button>
+          <a class="platform-link" href="${LAB_URL}" target="_blank" rel="noopener noreferrer">カメレオンJPの実験場</a>
+        </div>
+        <p id="p7-home-share-status" class="platform-status" role="status" aria-live="polite"></p>
       </div>
     </section>
 
@@ -555,6 +714,19 @@ root.innerHTML = `
         </div>
         <p id="p6-result-advice" class="p6-result-advice">次回の助言</p>
         <p id="p6-result-record" class="p6-result-record">記録なし</p>
+        <section class="result-platform" aria-labelledby="p6-result-platform-title">
+          <p class="eyebrow" id="p6-result-platform-title">RESULT SIGNAL</p>
+          <p id="p6-result-player" class="platform-status">結果をシェアできます。</p>
+          <textarea id="p6-result-share-text" class="result-share-text" rows="4" readonly aria-label="P6結果のシェア文"></textarea>
+          <button class="text-button platform-action-button" id="p6-result-share" type="button">シェア文をコピー</button>
+          <p id="p6-result-share-status" class="platform-status" role="status" aria-live="polite"></p>
+          <div class="online-ranking" aria-labelledby="p6-ranking-title">
+            <h3 id="p6-ranking-title">オンライン上位10名</h3>
+            <ol id="p6-ranking-list" class="online-ranking-list"></ol>
+            <p id="p6-ranking-status" class="platform-status" role="status" aria-live="polite">ランキングを読み込み中…</p>
+          </div>
+          <a class="platform-link" href="${LAB_URL}" target="_blank" rel="noopener noreferrer">カメレオンJPの実験場</a>
+        </section>
         <div class="p6-result-actions">
           <button class="resume-button" type="button" data-action="p6-retry">もう一度試す</button>
           <button class="text-button" type="button" data-action="p6-result-settings">設定</button>
@@ -577,6 +749,19 @@ root.innerHTML = `
         </div>
         <p id="p7-result-advice" class="p6-result-advice">次回の助言</p>
         <p id="p7-result-record" class="p6-result-record">記録なし</p>
+        <section class="result-platform" aria-labelledby="p7-result-platform-title">
+          <p class="eyebrow" id="p7-result-platform-title">RESULT SIGNAL</p>
+          <p id="p7-result-player" class="platform-status">結果をシェアできます。</p>
+          <textarea id="p7-result-share-text" class="result-share-text" rows="4" readonly aria-label="P7結果のシェア文"></textarea>
+          <button class="text-button platform-action-button" id="p7-result-share" type="button">シェア文をコピー</button>
+          <p id="p7-result-share-status" class="platform-status" role="status" aria-live="polite"></p>
+          <div class="online-ranking" aria-labelledby="p7-ranking-title">
+            <h3 id="p7-ranking-title">オンライン上位10名</h3>
+            <ol id="p7-ranking-list" class="online-ranking-list"></ol>
+            <p id="p7-ranking-status" class="platform-status" role="status" aria-live="polite">ランキングを読み込み中…</p>
+          </div>
+          <a class="platform-link" href="${LAB_URL}" target="_blank" rel="noopener noreferrer">カメレオンJPの実験場</a>
+        </section>
         <div class="p6-result-actions">
           <button class="resume-button" type="button" data-action="p7-retry">この面をもう一度</button>
           <button class="text-button" type="button" data-action="p7-select-stage">面を選ぶ</button>
@@ -685,6 +870,32 @@ const p7ResultAdvice = required<HTMLElement>("#p7-result-advice");
 const p7ResultRecord = required<HTMLElement>("#p7-result-record");
 const p7RetryButton = required<HTMLButtonElement>("[data-action='p7-retry']");
 const p7SelectStageButton = required<HTMLButtonElement>("[data-action='p7-select-stage']");
+const publicStartOverlay = required<HTMLElement>("#public-start-overlay");
+const publicPlayerNameInput = required<HTMLInputElement>("#public-player-name");
+const publicPlayerNameStatus = required<HTMLElement>("#public-player-name-status");
+const publicStartButton = required<HTMLButtonElement>("#public-start-button");
+const publicHomeShareButton = required<HTMLButtonElement>("#public-home-share");
+const publicHomeShareStatus = required<HTMLElement>("#public-home-share-status");
+const p6PlayerNameInput = required<HTMLInputElement>("#p6-player-name");
+const p6PlayerNameStatus = required<HTMLElement>("#p6-player-name-status");
+const p6HomeShareButton = required<HTMLButtonElement>("#p6-home-share");
+const p6HomeShareStatus = required<HTMLElement>("#p6-home-share-status");
+const p6ResultPlayer = required<HTMLElement>("#p6-result-player");
+const p6ResultShareText = required<HTMLTextAreaElement>("#p6-result-share-text");
+const p6ResultShareButton = required<HTMLButtonElement>("#p6-result-share");
+const p6ResultShareStatus = required<HTMLElement>("#p6-result-share-status");
+const p6RankingList = required<HTMLElement>("#p6-ranking-list");
+const p6RankingStatus = required<HTMLElement>("#p6-ranking-status");
+const p7PlayerNameInput = required<HTMLInputElement>("#p7-player-name");
+const p7PlayerNameStatus = required<HTMLElement>("#p7-player-name-status");
+const p7HomeShareButton = required<HTMLButtonElement>("#p7-home-share");
+const p7HomeShareStatus = required<HTMLElement>("#p7-home-share-status");
+const p7ResultPlayer = required<HTMLElement>("#p7-result-player");
+const p7ResultShareText = required<HTMLTextAreaElement>("#p7-result-share-text");
+const p7ResultShareButton = required<HTMLButtonElement>("#p7-result-share");
+const p7ResultShareStatus = required<HTMLElement>("#p7-result-share-status");
+const p7RankingList = required<HTMLElement>("#p7-ranking-list");
+const p7RankingStatus = required<HTMLElement>("#p7-ranking-status");
 const signalControls = required<HTMLElement>(".signal-controls");
 const query = new URLSearchParams(window.location.search);
 const p1ProbeEnabled = query.get("p1-probe") === "1";
@@ -701,6 +912,12 @@ const p6E2EEnabled = import.meta.env.DEV && p6Mode && query.get("p6-e2e") === "1
 const p7E2EEnabled = import.meta.env.DEV && p7Mode && query.get("p7-e2e") === "1";
 const p8CheckEnabled = import.meta.env.DEV && query.get("p8-check") === "1";
 const debugEnabled = p1ProbeEnabled || p8CheckEnabled || query.get("debug") === "1";
+const publicStartRequired = !p1ProbeEnabled
+  && !p3E2EEnabled
+  && !p4E2EEnabled
+  && !p5E2EEnabled
+  && !p6Mode
+  && !p7Mode;
 signalControls.hidden = !p1ProbeEnabled;
 p2Status.hidden = p4Mode || p5WorldMode;
 p4Status.hidden = !p4Mode;
@@ -1157,6 +1374,123 @@ let p7Metrics = createP6RunMetrics(p6Settings.assistedMode);
 let p7Result: P7Result | null = null;
 let p7ResultShown = false;
 let p7MenuOpen = false;
+let resultPlatformKey = "";
+let publicStartPending = publicStartRequired;
+
+function syncPlayerNameFields(): void {
+  const message = playerName
+    ? `${playerName}さんの名前で記録します。`
+    : "名前を入力するとゲームを開始できます。";
+  publicPlayerNameInput.value = playerName;
+  p6PlayerNameInput.value = playerName;
+  p7PlayerNameInput.value = playerName;
+  publicPlayerNameStatus.textContent = message;
+  p6PlayerNameStatus.textContent = message;
+  p7PlayerNameStatus.textContent = playerName
+    ? `${playerName}さんの名前で記録します。`
+    : "名前を入力すると面を開始できます。";
+  publicStartButton.disabled = publicStartRequired && !playerName;
+  p6StartButton.disabled = p6Mode && !p6E2EEnabled && !playerName;
+  p6SkipIntroButton.disabled = p6Mode && !p6E2EEnabled && !playerName;
+}
+
+type NameGate = "public" | "p6" | "p7";
+
+function ensurePlayerName(gate: NameGate): boolean {
+  if (playerName) return true;
+  const e2eAllowed = (gate === "public" && (p3E2EEnabled || p4E2EEnabled || p5E2EEnabled))
+    || (gate === "p6" && p6E2EEnabled)
+    || (gate === "p7" && p7E2EEnabled);
+  if (e2eAllowed) {
+    playerName = savePlayerName("E2Eプレイヤー");
+    syncPlayerNameFields();
+    return true;
+  }
+  const input = gate === "p6"
+    ? p6PlayerNameInput
+    : gate === "p7"
+      ? p7PlayerNameInput
+      : publicPlayerNameInput;
+  const status = gate === "p6"
+    ? p6PlayerNameStatus
+    : gate === "p7"
+      ? p7PlayerNameStatus
+      : publicPlayerNameStatus;
+  status.textContent = "プレイヤー名を入力してから開始してください。";
+  input.focus({ preventScroll: true });
+  return false;
+}
+
+function startPublicGame(): void {
+  if (!publicStartPending || portrait || !ensurePlayerName("public")) return;
+  recordP8Event("public-start");
+  publicStartPending = false;
+  publicStartOverlay.hidden = true;
+  paused = false;
+  resumeRequired = false;
+  input.clearAllInput("manual-clear");
+  if (interactionLayer.inert) unblockInteraction();
+  clearSimulationDebt();
+  lastFrameTime = performance.now();
+}
+
+async function loadResultRanking(
+  result: P6Result,
+  list: HTMLElement,
+  status: HTMLElement,
+  resultKey: string,
+): Promise<void> {
+  if (resultPlatformKey === resultKey) return;
+  resultPlatformKey = resultKey;
+  status.textContent = "ランキングを更新中…";
+  try {
+    if (result.completed && playerName) {
+      await callRankingRpc("submit_score", {
+        p_display_name: playerName,
+        p_game_slug: GAME_SLUG,
+        p_score: Math.round(result.totalScore),
+        p_client_version: CLIENT_VERSION,
+      });
+    }
+    const ranking = await callRankingRpc("get_best_score_ranking", {
+      p_game_slug: GAME_SLUG,
+      p_limit: 10,
+    });
+    renderRanking(list, status, normalizeRanking(ranking));
+  } catch {
+    status.textContent = "オンラインランキングは現在準備中です。結果は端末に保存されています。";
+  }
+}
+
+function prepareP6ResultPlatform(): void {
+  if (!p6Result) return;
+  const result = p6Result;
+  const scoreText = result.completed ? `${result.totalScore.toLocaleString("ja-JP")}点` : "未クリア";
+  const gradeText = result.completed ? `評価${result.grade}` : "評価なし";
+  p6ResultPlayer.textContent = `${playerName || "プレイヤー"}さんの結果`;
+  p6ResultShareText.value = `${playerName || "プレイヤー"}さんのOITATE結果：${scoreText}・${gradeText}。\n安全 ${result.breakdown.safety.toLocaleString("ja-JP")} / 統率 ${result.breakdown.coordination.toLocaleString("ja-JP")} / 判断 ${result.breakdown.judgement.toLocaleString("ja-JP")} / 時間 ${result.breakdown.time.toLocaleString("ja-JP")}\n${currentGameUrl()}\n#OITATE #カメレオンJP #ミニゲーム`;
+  p6ResultShareStatus.textContent = "結果の文をそのままコピーできます。";
+  p6RankingList.replaceChildren();
+  const resultKey = `p6:${result.completed}:${result.totalScore}:${result.grade}:${result.elapsedSeconds}:${result.assistedMode}`;
+  void loadResultRanking(result, p6RankingList, p6RankingStatus, resultKey);
+}
+
+function prepareP7ResultPlatform(): void {
+  if (!p7Result) return;
+  const result = p7Result;
+  const stage = getP7Stage(result.stageId);
+  const scoreText = result.completed ? `${result.totalScore.toLocaleString("ja-JP")}点` : "未クリア";
+  const gradeText = result.completed ? `評価${result.grade}` : "評価なし";
+  p7ResultPlayer.textContent = `${playerName || "プレイヤー"}さんの結果`;
+  p7ResultShareText.value = `${playerName || "プレイヤー"}さんのOITATE「${stage.title}」結果：${scoreText}・${gradeText}。\n安全 ${result.breakdown.safety.toLocaleString("ja-JP")} / 統率 ${result.breakdown.coordination.toLocaleString("ja-JP")} / 危険管理 ${result.breakdown.judgement.toLocaleString("ja-JP")} / 時間 ${result.breakdown.time.toLocaleString("ja-JP")}\n${currentGameUrl()}\n#OITATE #カメレオンJP #ミニゲーム`;
+  p7ResultShareStatus.textContent = "結果の文をそのままコピーできます。";
+  p7RankingList.replaceChildren();
+  const resultKey = `p7:${result.stageId}:${result.completed}:${result.totalScore}:${result.grade}:${result.elapsedSeconds}:${result.assistedMode}`;
+  void loadResultRanking(result, p7RankingList, p7RankingStatus, resultKey);
+}
+
+publicStartOverlay.hidden = !publicStartRequired || portrait;
+syncPlayerNameFields();
 
 function recordP8Event(type: string, detail?: string): void {
   p8Recorder?.recordEvent(type, activePlaySeconds, detail);
@@ -1362,10 +1696,19 @@ const input = new InputController(root, {
       paused = true;
       resumeRequired = true;
       resumeOverlay.hidden = true;
+      publicStartOverlay.hidden = true;
       clearSimulationDebt();
       blockInteraction(orientationOverlay);
     } else {
-      showResume("横画面へ戻りました");
+      if (publicStartPending) {
+        paused = true;
+        resumeRequired = false;
+        resumeOverlay.hidden = true;
+        publicStartOverlay.hidden = false;
+        blockInteraction(publicPlayerNameInput);
+      } else {
+        showResume("横画面へ戻りました");
+      }
     }
   },
   onLifecyclePauseRequested: requestAutoPause,
@@ -1379,6 +1722,30 @@ const input = new InputController(root, {
 p4ThreatButton.addEventListener("click", pulseP4ThreatSignal);
 p5GuidanceButton.addEventListener("click", () => pulseP5Signal("guidance"));
 p5ThreatButton.addEventListener("click", () => pulseP5Signal("threat"));
+const handlePlayerNameInput = (inputElement: HTMLInputElement): void => {
+  playerName = savePlayerName(inputElement.value);
+  syncPlayerNameFields();
+  syncP6Intro();
+};
+publicPlayerNameInput.addEventListener("input", () => handlePlayerNameInput(publicPlayerNameInput));
+p6PlayerNameInput.addEventListener("input", () => handlePlayerNameInput(p6PlayerNameInput));
+p7PlayerNameInput.addEventListener("input", () => handlePlayerNameInput(p7PlayerNameInput));
+publicStartButton.addEventListener("click", startPublicGame);
+publicHomeShareButton.addEventListener("click", () => {
+  void shareOrCopy(homeShareMessage(), publicHomeShareStatus);
+});
+p6HomeShareButton.addEventListener("click", () => {
+  void shareOrCopy(homeShareMessage(), p6HomeShareStatus);
+});
+p7HomeShareButton.addEventListener("click", () => {
+  void shareOrCopy(homeShareMessage(), p7HomeShareStatus);
+});
+p6ResultShareButton.addEventListener("click", () => {
+  void shareOrCopy(p6ResultShareText.value, p6ResultShareStatus, "OITATEの結果");
+});
+p7ResultShareButton.addEventListener("click", () => {
+  void shareOrCopy(p7ResultShareText.value, p7ResultShareStatus, "OITATEの結果");
+});
 p6SettingsButton.addEventListener("click", () => openP6Settings(false));
 p6StartButton.addEventListener("click", startP6Prototype);
 p6SkipIntroButton.addEventListener("click", startP6Prototype);
@@ -1450,6 +1817,14 @@ function syncP6Intro(): void {
   p6IntroSteps.hidden = returningPlayer;
   p6StartButton.textContent = returningPlayer ? "要点を確認して始める" : "説明を確認して始める";
   p6SkipIntroButton.textContent = returningPlayer ? "すぐに始める" : "説明を飛ばして始める";
+  syncPlayerNameFields();
+}
+
+if (publicStartPending && !portrait) {
+  paused = true;
+  resumeRequired = false;
+  publicStartOverlay.hidden = false;
+  blockInteraction(publicPlayerNameInput);
 }
 
 if (p6Mode && !portrait) {
@@ -1459,7 +1834,7 @@ if (p6Mode && !portrait) {
   syncP6Intro();
   syncP6SettingsControls();
   updateP6Status();
-  blockInteraction(p6StartButton);
+  blockInteraction(p6PlayerNameInput);
 }
 
 if (p7Mode && !portrait) {
@@ -1471,7 +1846,7 @@ if (p7Mode && !portrait) {
   syncP6SettingsControls();
   updateP7Status();
   renderP7StageMenu();
-  blockInteraction(p7StageList.querySelector<HTMLButtonElement>("button:not(:disabled)") ?? p7StageMenuButton);
+  blockInteraction(p7PlayerNameInput);
 }
 
 if (portrait) {
@@ -1532,6 +1907,7 @@ function resetP5Prototype(): void {
   p5PendingGuidanceSignal = false;
   p5PendingThreatSignal = false;
   p5ResultShown = false;
+  resultPlatformKey = "";
   p6Result = null;
   p6ResultShown = false;
   p6Metrics = createP6RunMetrics(p6Settings.assistedMode);
@@ -1676,12 +2052,11 @@ function showP7StageMenu(initial = false): void {
   resumeRequired = false;
   input.clearAllInput("manual-clear");
   renderP7StageMenu();
-  const firstAvailable = p7StageList.querySelector<HTMLButtonElement>("button:not(:disabled)");
-  blockInteraction(firstAvailable ?? p7StageMenuButton);
+  blockInteraction(p7PlayerNameInput);
 }
 
 function startP7Stage(stageId: P7StageId): void {
-  if (!p7Mode || !isP7StageUnlocked(p7Progress, stageId)) return;
+  if (!p7Mode || !isP7StageUnlocked(p7Progress, stageId) || !ensurePlayerName("p7")) return;
   recordP8Event("p7-stage-start", String(stageId));
   p7StageId = stageId;
   p7MenuOpen = false;
@@ -1730,6 +2105,7 @@ function populateP7Result(): void {
   p7ResultRecord.textContent = record
     ? `${p7SettingsLabel()}のこの面の最高記録：${record.bestScore.toLocaleString("ja-JP")}点 / ${record.bestGrade}`
     : "この面の記録はまだありません";
+  prepareP7ResultPlatform();
 }
 
 function showP7Result(): void {
@@ -1804,6 +2180,7 @@ function populateP6Result(): void {
     ? (p6Result.assistedMode ? "補助あり" : "標準") + "の最高記録："
       + record.bestScore.toLocaleString("ja-JP") + "点 / " + record.bestGrade
     : "このモードの記録はまだありません";
+  prepareP6ResultPlatform();
 }
 
 function showP6Result(): void {
@@ -1868,7 +2245,7 @@ function closeP6Settings(): void {
 }
 
 function startP6Prototype(): void {
-  if (!p6Mode || portrait) return;
+  if (!p6Mode || portrait || !ensurePlayerName("p6")) return;
   recordP8Event("p6-start");
   p6IntroOverlay.hidden = true;
   p6SettingsButton.hidden = false;
