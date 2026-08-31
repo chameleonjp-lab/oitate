@@ -26,10 +26,19 @@
           <p class="eyebrow">ANIMAL GUIDANCE ACTION PUZZLE</p>
           <h1 id="hero-title">動物を直接命令せず、<br /><em>立ち位置と合図</em>で導く。</h1>
           <p class="lead">性質の異なる動物の群れを観察し、安全な囲いへ導く3Dアクションパズルです。近づき方、合図、危険の順番を考えて進みます。</p>
+          <div class="player-entry" aria-labelledby="player-entry-title">
+            <p class="eyebrow" id="player-entry-title">PLAYER IDENTIFICATION</p>
+            <label for="candidate-player-name">ランキング表示名（必須）</label>
+            <input id="candidate-player-name" type="text" maxlength="20" autocomplete="name" placeholder="20文字以内で入力" required />
+            <small id="candidate-player-name-status" role="status" aria-live="polite">名前を入力してからゲームを始めます。</small>
+          </div>
           <div class="hero-actions">
-            <a class="primary-button" href="./?p7=1">ゲームを始める <span aria-hidden="true">→</span></a>
+            <a class="primary-button" id="game-start-link" href="./?p7=1">ゲームを始める <span aria-hidden="true">→</span></a>
+            <button class="secondary-button" id="candidate-share" type="button">このゲームをシェア</button>
             <a class="secondary-link" href="#how-to-play">遊び方を見る</a>
           </div>
+          <p class="share-status" id="candidate-share-status" role="status" aria-live="polite"></p>
+          <a class="lab-link" href="https://chameleonjp-lab.github.io/chameleonjp_lab/" target="_blank" rel="noopener noreferrer">カメレオンJPの実験場 ↗</a>
           <p class="candidate-note">このページは公開前の確認用です。実機確認と最終素材の準備が終わるまで、一般公開版とは扱いません。</p>
         </div>
         <figure class="hero-art">
@@ -77,7 +86,7 @@
         <div class="detail-grid">
           <article><h3>対応端末</h3><p><strong>主基準：</strong> iPhone 17 Pro・Safari・横画面</p><p><strong>確認対象：</strong> iPhone 11 Pro、iPad Pro 2018、PCの主要ブラウザ</p><p>縦画面では安全に停止し、横向きへの変更を案内します。</p></article>
           <article><h3>設定と補助</h3><p>音と振動は個別に切り替えられます。補助ありでは危険種の動きを少し読みやすくします。</p><p>音や振動を使わなくても、画面内の文字・動き・輪郭で判断できます。</p></article>
-          <article><h3>記録と通信</h3><p>進行と記録は端末内に保存します。アカウント、ランキング、外部送信は使いません。</p><p>候補ページも外部画像や外部フォントを読み込みません。</p></article>
+          <article><h3>記録と通信</h3><p>進行と名前は端末内に保存します。クリア時のスコアだけ、上位10名のランキングへ送信できます。</p><p>候補ページも外部画像や外部フォントを読み込みません。</p></article>
         </div>
       </section>
 
@@ -102,6 +111,61 @@
       </section>
     </main>
 
-    <footer class="site-footer section-wrap"><p>OITATE｜公開候補版</p><nav aria-label="関連リンク"><a href="./?p7=1">ゲームを始める</a><a href="#status-title">開発状況</a><a href="#status-title">確認事項</a></nav><p class="footer-note">公開判断には、ユーザーの明示承認が必要です。</p></footer>
+    <footer class="site-footer section-wrap"><p>OITATE｜公開候補版</p><nav aria-label="関連リンク"><a href="./?p7=1">ゲームを始める</a><a href="https://chameleonjp-lab.github.io/chameleonjp_lab/" target="_blank" rel="noopener noreferrer">カメレオンJPの実験場</a><a href="#status-title">開発状況</a><a href="#status-title">確認事項</a></nav><p class="footer-note">公開判断には、ユーザーの明示承認が必要です。</p></footer>
+  <script>
+    (function () {
+      var nameKey = "oitate.player-name";
+      var nameInput = document.getElementById("candidate-player-name");
+      var nameStatus = document.getElementById("candidate-player-name-status");
+      var startLink = document.getElementById("game-start-link");
+      var shareButton = document.getElementById("candidate-share");
+      var shareStatus = document.getElementById("candidate-share-status");
+      if (!nameInput || !nameStatus || !startLink || !shareButton || !shareStatus) return;
+      var clean = function (value) {
+        return value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 20);
+      };
+      try { nameInput.value = clean(localStorage.getItem(nameKey) || ""); } catch (_) {}
+      nameInput.addEventListener("input", function () {
+        var value = clean(nameInput.value);
+        nameInput.value = value;
+        try {
+          if (value) localStorage.setItem(nameKey, value);
+          else localStorage.removeItem(nameKey);
+        } catch (_) {}
+        nameStatus.textContent = value ? value + "さんの名前で記録します。" : "名前を入力してからゲームを始めます。";
+      });
+      startLink.addEventListener("click", function (event) {
+        var value = clean(nameInput.value);
+        nameInput.value = value;
+        if (!value) {
+          event.preventDefault();
+          nameStatus.textContent = "プレイヤー名を入力してから開始してください。";
+          nameInput.focus();
+          return;
+        }
+        try { localStorage.setItem(nameKey, value); } catch (_) {}
+      });
+      shareButton.addEventListener("click", async function () {
+        var text = "OITATEで、動物の性質を読んで囲いへ導こう！\n" + window.location.href.split("#")[0] + "\n#OITATE #カメレオンJP #ミニゲーム";
+        shareStatus.textContent = "";
+        if (navigator.share) {
+          try {
+            await navigator.share({ title: "OITATE", text: text });
+            shareStatus.textContent = "共有しました。";
+            return;
+          } catch (error) {
+            if (error && error.name === "AbortError") return;
+          }
+        }
+        try {
+          if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error("clipboard unavailable");
+          await navigator.clipboard.writeText(text);
+          shareStatus.textContent = "シェア文をコピーしました。";
+        } catch (_) {
+          shareStatus.textContent = "コピーできませんでした。もう一度お試しください。";
+        }
+      });
+    }());
+  </script>
   </body>
 </html>

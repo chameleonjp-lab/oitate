@@ -9,6 +9,7 @@ test.describe("iPhone portrait gameplay", () => {
     await expect(page.locator("#orientation-overlay")).toBeHidden();
     await expect(page.locator("#p7-stage-menu-overlay")).toBeVisible();
 
+    await page.locator("#p7-player-name").fill("テストプレイヤー");
     await page.locator('button[data-p7-stage="0"]').click();
     await expect(page.locator(".game-canvas")).toBeVisible();
 
