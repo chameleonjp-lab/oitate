@@ -76,6 +76,11 @@ test("keeps the P1 input probe behind an explicit development query", async ({ p
 });
 
 test("shows a readable anticipating phase before a coward flees", async ({ page }) => {
+  // The public build now requires a player name before normal gameplay can advance.
+  await page.locator("#public-player-name").fill("テストプレイヤー");
+  await page.locator("#public-start-button").click();
+  await expect(page.locator("#public-start-overlay")).toBeHidden();
+
   const before = await getP2State(page);
   const middleBefore = before.animals.find((animal) => animal.id === "coward-2");
   expect(middleBefore).toBeTruthy();
