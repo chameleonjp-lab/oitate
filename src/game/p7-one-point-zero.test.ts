@@ -250,4 +250,14 @@ describe("P7 1.0 content progression", () => {
     expect(progress.records[1]?.standard?.mode).toBe("standard");
     expect(progress.records[1]?.assisted?.mode).toBe("assisted");
   });
+
+  it("falls back to the initial progress when an injected storage throws while reading", () => {
+    const storage: P7Storage = {
+      getItem: () => { throw new Error("storage read failed"); },
+      setItem: () => { throw new Error("storage write failed"); },
+    };
+
+    expect(readP7Progress(storage)).toEqual(createP7Progress());
+    expect(() => writeP7Progress(createP7Progress(), storage)).not.toThrow();
+  });
 });

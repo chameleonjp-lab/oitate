@@ -5,6 +5,7 @@ import {
   createP6RunMetrics,
   observeP6Run,
   readP6RecordBook,
+  readP6Settings,
   updateP6RecordBook,
   writeP6RecordBook,
   type P6Storage,
@@ -157,4 +158,32 @@ describe("P6 vertical-slice completion scoring", () => {
     const result = calculateP6Result(createP6RunMetrics(), state);
     expect(result.breakdown.time).toBe(3000);
   });
+
+  it("falls back to defaults when an injected storage throws while reading", () => {
+    const storage: P6Storage = {
+      getItem: () => { throw new Error("storage read failed"); },
+      setItem: () => { throw new Error("storage write failed"); },
+    };
+
+    expect(readP6RecordBook(storage)).toEqual({
+      introSeen: false,
+      standard: null,
+      assisted: null,
+    });
+    expect(readP6Settings(storage)).toEqual({
+      soundEnabled: true,
+      vibrationEnabled: true,
+      assistedMode: false,
+      largeControls: false,
+    });
+    expect(() => writeP6RecordBook(emptyRecordBookForTest(), storage)).not.toThrow();
+  });
 });
+
+function emptyRecordBookForTest() {
+  return {
+    introSeen: false,
+    standard: null,
+    assisted: null,
+  };
+}

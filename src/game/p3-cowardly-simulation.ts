@@ -419,8 +419,13 @@ function desiredFleeDirection(
   const away = normalized(animal.x - player.x, animal.z - player.z);
   const cohesion = normalized(state.flock.centerX - animal.x, state.flock.centerZ - animal.z);
   const towardPen = normalized(state.pen.centerX - animal.x, state.pen.entranceZ - animal.z);
-  let x = away.x * 0.72 + cohesion.x * 0.25 + towardPen.x * 0.08;
-  let z = away.z * 0.72 + cohesion.z * 0.25 + towardPen.z * 0.08;
+  const remainingCount = state.animals.filter((candidate) => candidate.phase !== "captured").length;
+  const finalAnimal = remainingCount === 1;
+  const awayWeight = finalAnimal ? 0.58 : 0.72;
+  const cohesionWeight = finalAnimal ? 0 : 0.25;
+  const penWeight = finalAnimal ? 0.42 : 0.08;
+  let x = away.x * awayWeight + cohesion.x * cohesionWeight + towardPen.x * penWeight;
+  let z = away.z * awayWeight + cohesion.z * cohesionWeight + towardPen.z * penWeight;
   if (animal.tensionState === "confused") {
     const wobble = Math.sin(state.elapsedSeconds * 3.2 + Number(animal.id.at(-1) ?? 1));
     x += -away.z * wobble * 0.22;
@@ -654,6 +659,27 @@ function reconcileEntrance(
       }
     }
   }
+  // With one animal left there is no flock queue to protect. The final animal
+  // must not remain in the queue/back-off loop once it owns or reaches the gate.
+  const remaining = animals.filter((candidate) => candidate.phase !== "captured");
+  const finalAnimal = remaining.length === 1 ? remaining[0] : null;
+  if (!owner
+    && finalAnimal
+    && (finalAnimal.phase === "fleeing" || finalAnimal.phase === "waitingForEntrance")
+    && (isNearEntrance(finalAnimal, state.pen) || isFullBodyInsidePen(finalAnimal, state.pen))) {
+    owner = finalAnimal;
+  }
+  if (owner
+    && finalAnimal
+    && owner.id === finalAnimal.id
+    && (owner.phase === "fleeing" || owner.phase === "waitingForEntrance")
+    && (isNearEntrance(owner, state.pen) || isFullBodyInsidePen(owner, state.pen))) {
+    owner.phase = "enteringPen";
+    owner.phaseSeconds = 0;
+    owner.captureHoldSeconds = 0;
+    owner.waitingSeconds = 0;
+    owner.fleeTriggerBand = null;
+  }
   state.penReservedAnimalId = owner?.id ?? null;
 
   for (const animal of animals) {
@@ -759,6 +785,10 @@ function placeCapturedAnimal(state: P3SimulationState, animal: P3AnimalState): v
     bounds.maxX,
   );
   animal.z = clamp(state.pen.centerZ, bounds.minZ, bounds.maxZ);
+  // Captured animals are stationary. Keep interpolation history at the same
+  // position so the renderer cannot repeatedly lerp from an old outside point.
+  animal.previousX = animal.x;
+  animal.previousZ = animal.z;
   animal.fullBodyInside = true;
   animal.lastMoveX = 0;
   animal.lastMoveZ = 0;

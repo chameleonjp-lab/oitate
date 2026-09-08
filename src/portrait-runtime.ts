@@ -18,3 +18,5 @@ function clearHeldInputAfterOrientationChange(): void {
 
 window.addEventListener("orientationchange", clearHeldInputAfterOrientationChange);
 window.addEventListener("resize", clearHeldInputAfterOrientationChange);
+
+export {};
