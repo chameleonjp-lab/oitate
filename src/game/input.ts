@@ -67,7 +67,9 @@ const KEY_TO_AXIS: Record<string, { x: number; y: number }> = {
 const SIGNAL_CONTROLS: readonly SignalType[] = ["guidance", "threat"];
 
 export function isPortraitViewport(): boolean {
-  return window.innerHeight > window.innerWidth;
+  // Portrait is a supported play orientation from 1.0 onward.
+  // Keep the historical API stable while disabling the old portrait blocker.
+  return false;
 }
 
 function normalizeAngle(angle: number): number {

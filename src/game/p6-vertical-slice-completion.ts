@@ -17,6 +17,7 @@ export interface P6Settings {
 export interface P6Storage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  removeItem?(key: string): void;
 }
 
 export interface P6RunMetrics {
@@ -134,9 +135,9 @@ function parseRecord(value: unknown, mode: P6RecordMode): P6Record | null {
 
 export function readP6RecordBook(storage?: P6Storage): P6RecordBook {
   const source = resolveStorage(storage);
-  const raw = source?.getItem(RECORD_BOOK_KEY);
-  if (!raw) return emptyRecordBook();
   try {
+    const raw = source?.getItem(RECORD_BOOK_KEY);
+    if (!raw) return emptyRecordBook();
     const parsed = asObject(JSON.parse(raw));
     if (!parsed) return emptyRecordBook();
     return {
@@ -160,9 +161,9 @@ export function writeP6RecordBook(book: P6RecordBook, storage?: P6Storage): void
 
 export function readP6Settings(storage?: P6Storage): P6Settings {
   const source = resolveStorage(storage);
-  const raw = source?.getItem(SETTINGS_KEY);
-  if (!raw) return { ...DEFAULT_P6_SETTINGS };
   try {
+    const raw = source?.getItem(SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_P6_SETTINGS };
     const parsed = asObject(JSON.parse(raw));
     if (!parsed) return { ...DEFAULT_P6_SETTINGS };
     return {

@@ -43,6 +43,10 @@ import {
 } from "./game/p5-vertical-slice-simulation";
 import { FixedStepSimulation } from "./game/fixed-step";
 import {
+  createResilientStorage,
+  type ResilientStorage,
+} from "./app/storage";
+import {
   calculateP6Result,
   createP6RunMetrics,
   formatP6Time,
@@ -56,6 +60,7 @@ import {
   type P6Record,
   type P6Result,
   type P6Settings,
+  type P6Storage,
 } from "./game/p6-vertical-slice-completion";
 import {
   calculateP7Result,
@@ -322,19 +327,19 @@ function cleanPlayerName(value: string): string {
   return value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 20);
 }
 
-function readPlayerName(): string {
+function readPlayerName(storage: P6Storage): string {
   try {
-    return cleanPlayerName(localStorage.getItem(PLAYER_NAME_KEY) ?? "");
+    return cleanPlayerName(storage.getItem(PLAYER_NAME_KEY) ?? "");
   } catch {
     return "";
   }
 }
 
-function savePlayerName(value: string): string {
+function savePlayerName(value: string, storage: ResilientStorage): string {
   const name = cleanPlayerName(value);
   try {
-    if (name) localStorage.setItem(PLAYER_NAME_KEY, name);
-    else localStorage.removeItem(PLAYER_NAME_KEY);
+    if (name) storage.setItem(PLAYER_NAME_KEY, name);
+    else storage.removeItem(PLAYER_NAME_KEY);
   } catch {
     // Keep the current-session value even when storage is unavailable.
   }
@@ -426,7 +431,8 @@ function renderRanking(list: HTMLElement, status: HTMLElement, rows: OnlineRanki
   });
 }
 
-let playerName = readPlayerName();
+const storage = createResilientStorage();
+let playerName = readPlayerName(storage);
 
 interface P3PublicApi {
   getState: () => P3PublicState;
@@ -899,25 +905,34 @@ const p7RankingStatus = required<HTMLElement>("#p7-ranking-status");
 const signalControls = required<HTMLElement>(".signal-controls");
 const query = new URLSearchParams(window.location.search);
 const p1ProbeEnabled = query.get("p1-probe") === "1";
-const p7Mode = query.get("p7") === "1";
-const p6Mode = !p7Mode && query.get("p6") === "1";
-const p5Mode = !p7Mode && !p6Mode && query.get("p5") === "1";
-const p5WorldMode = p5Mode || p6Mode || p7Mode;
-const p4Mode = !p5WorldMode && query.get("p4") === "1";
+const p7AliasRequested = query.get("p7") === "1";
+const p6Mode = !p7AliasRequested && query.get("p6") === "1";
+const p5Mode = !p7AliasRequested && !p6Mode && query.get("p5") === "1";
 const p3E2EEnabled = import.meta.env.DEV
   && (query.get("p3-e2e") === "1" || query.get("p2-e2e") === "1");
+const p3Mode = !p7AliasRequested && !p6Mode && !p5Mode
+  && query.get("p4") !== "1"
+  && (query.get("p3") === "1" || p3E2EEnabled || p1ProbeEnabled);
+const p4Mode = !p7AliasRequested && !p6Mode && !p5Mode && !p3Mode
+  && query.get("p4") === "1";
+// The product entry is the P7 menu. `?p7=1` remains a stable alias for links
+// and existing checks; P3 is available only through an explicit regression
+// query so the public URL cannot silently open the prototype.
+const p7Mode = p7AliasRequested || (!p3Mode && !p4Mode && !p5Mode && !p6Mode);
+const p5WorldMode = p5Mode || p6Mode || p7Mode;
 const p4E2EEnabled = import.meta.env.DEV && p4Mode && query.get("p4-e2e") === "1";
 const p5E2EEnabled = import.meta.env.DEV && p5Mode && query.get("p5-e2e") === "1";
 const p6E2EEnabled = import.meta.env.DEV && p6Mode && query.get("p6-e2e") === "1";
 const p7E2EEnabled = import.meta.env.DEV && p7Mode && query.get("p7-e2e") === "1";
 const p8CheckEnabled = import.meta.env.DEV && query.get("p8-check") === "1";
 const debugEnabled = p1ProbeEnabled || p8CheckEnabled || query.get("debug") === "1";
-const publicStartRequired = !p1ProbeEnabled
-  && !p3E2EEnabled
-  && !p4E2EEnabled
-  && !p5E2EEnabled
-  && !p6Mode
-  && !p7Mode;
+// The normal product entry is P7, whose stage menu owns the player-name gate.
+// Legacy P3/P4/P5 entries keep their original public start gate; only their
+// explicit development E2E fixtures may bypass it. P6 owns its gate inside
+// the intro overlay and must not receive a second public overlay.
+const publicStartRequired = (p3Mode && !p1ProbeEnabled && !p3E2EEnabled)
+  || (p4Mode && !p4E2EEnabled)
+  || (p5Mode && !p5E2EEnabled);
 signalControls.hidden = !p1ProbeEnabled;
 p2Status.hidden = p4Mode || p5WorldMode;
 p4Status.hidden = !p4Mode;
@@ -1343,7 +1358,7 @@ let p3Simulation: P3SimulationState = createP3Simulation();
 const P3_DECISION_SECONDS = P3_TUNING.decisionStepSeconds;
 let p4Simulation: P4SimulationState = createP4Simulation();
 const P4_DECISION_SECONDS = P4_TUNING.decisionStepSeconds;
-let p7Progress = readP7Progress();
+let p7Progress = readP7Progress(storage);
 let p7StageId: P7StageId = 0;
 let p5Simulation: P5SimulationState = createP5Simulation(
   p7Mode ? getP7Stage(p7StageId).simulation : undefined,
@@ -1363,8 +1378,8 @@ let p5PendingGuidanceSignal = false;
 let p5PendingThreatSignal = false;
 let p5ResultShown = false;
 let previousFocus: HTMLElement | null = null;
-let p6Settings: P6Settings = readP6Settings();
-let p6RecordBook = readP6RecordBook();
+let p6Settings: P6Settings = readP6Settings(storage);
+let p6RecordBook = readP6RecordBook(storage);
 let p6Metrics = createP6RunMetrics(p6Settings.assistedMode);
 let p6Result: P6Result | null = null;
 let p6ResultShown = false;
@@ -1402,7 +1417,7 @@ function ensurePlayerName(gate: NameGate): boolean {
     || (gate === "p6" && p6E2EEnabled)
     || (gate === "p7" && p7E2EEnabled);
   if (e2eAllowed) {
-    playerName = savePlayerName("E2Eプレイヤー");
+    playerName = savePlayerName("E2Eプレイヤー", storage);
     syncPlayerNameFields();
     return true;
   }
@@ -1723,7 +1738,7 @@ p4ThreatButton.addEventListener("click", pulseP4ThreatSignal);
 p5GuidanceButton.addEventListener("click", () => pulseP5Signal("guidance"));
 p5ThreatButton.addEventListener("click", () => pulseP5Signal("threat"));
 const handlePlayerNameInput = (inputElement: HTMLInputElement): void => {
-  playerName = savePlayerName(inputElement.value);
+  playerName = savePlayerName(inputElement.value, storage);
   syncPlayerNameFields();
   syncP6Intro();
 };
@@ -1778,7 +1793,7 @@ function updateP6Settings(): void {
     assistedMode: requestedAssistedMode,
     largeControls: p6LargeControlsToggle.checked,
   };
-  writeP6Settings(p6Settings);
+  writeP6Settings(p6Settings, storage);
   if (restartP6Run) {
     resetP5Prototype();
   } else {
@@ -2117,7 +2132,7 @@ function showP7Result(): void {
   input.clearAllInput("manual-clear");
   p7Result = calculateP7Result(p7StageId, p7Metrics, p5Simulation);
   p7Progress = updateP7Progress(p7Progress, p7Result);
-  writeP7Progress(p7Progress);
+  writeP7Progress(p7Progress, storage);
   populateP7Result();
   updateP7Status();
   p7ResultOverlay.hidden = false;
@@ -2192,7 +2207,7 @@ function showP6Result(): void {
   input.clearAllInput("manual-clear");
   p6Result = calculateP6Result(p6Metrics, p5Simulation);
   p6RecordBook = updateP6RecordBook(p6RecordBook, p6Result);
-  writeP6RecordBook(p6RecordBook);
+  writeP6RecordBook(p6RecordBook, storage);
   populateP6Result();
   updateP6Status();
   p6ResultOverlay.hidden = false;
@@ -2250,7 +2265,7 @@ function startP6Prototype(): void {
   p6IntroOverlay.hidden = true;
   p6SettingsButton.hidden = false;
   p6RecordBook = markP6IntroSeen(p6RecordBook);
-  writeP6RecordBook(p6RecordBook);
+  writeP6RecordBook(p6RecordBook, storage);
   paused = false;
   resumeRequired = false;
   input.clearAllInput("manual-clear");
@@ -3420,7 +3435,17 @@ function frame(now: number): void {
     focusZ + Math.cos(snapshot.cameraYaw) * 10.5,
   );
   const cameraFollow = 1 - Math.exp(-Math.min(renderDeltaSeconds, 0.25) * 9);
-  camera.position.lerp(desiredCameraPosition, cameraFollow);
+  // Camera yaw is part of the movement contract. Snap the horizontal orbit to
+  // the requested yaw so the direction visible on screen and the direction
+  // used by held movement cannot disagree after a fast camera turn. Keep the
+  // vertical follow eased so the camera still feels smooth.
+  camera.position.x = desiredCameraPosition.x;
+  camera.position.z = desiredCameraPosition.z;
+  camera.position.y = THREE.MathUtils.lerp(
+    camera.position.y,
+    desiredCameraPosition.y,
+    cameraFollow,
+  );
   camera.lookAt(cameraTarget);
 
   const prototypeInterpolationAlpha = THREE.MathUtils.clamp(

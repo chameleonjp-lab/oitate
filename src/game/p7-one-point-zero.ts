@@ -237,9 +237,9 @@ export function createP7Progress(): P7Progress {
 
 export function readP7Progress(storage?: P7Storage): P7Progress {
   const source = resolveStorage(storage);
-  const raw = source?.getItem(PROGRESS_KEY);
-  if (!raw) return createP7Progress();
   try {
+    const raw = source?.getItem(PROGRESS_KEY);
+    if (!raw) return createP7Progress();
     const parsed = asObject(JSON.parse(raw));
     if (!parsed || parsed.version !== 1) return createP7Progress();
     const progress = createP7Progress();

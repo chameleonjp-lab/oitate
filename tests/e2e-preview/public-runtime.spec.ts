@@ -52,6 +52,15 @@ test("game entry serves without preview errors", async ({ page }) => {
   await expectHealthy(page, failures);
 });
 
+test("normal product URL serves the same P7 entry as its compatibility alias", async ({ page }) => {
+  const failures = observeRuntime(page);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("#app")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
+  await expect(page.locator("#p7-stage-menu-overlay")).toBeVisible();
+  await expect(page.locator("#p7-stage-list [data-p7-stage]")).toHaveCount(7);
+  await expectHealthy(page, failures);
+});
+
 test("keeps the P7 E2E hook out of the production preview", async ({ page }) => {
   const failures = observeRuntime(page);
   await page.goto("/?p7=1&p7-e2e=1", { waitUntil: "domcontentloaded" });

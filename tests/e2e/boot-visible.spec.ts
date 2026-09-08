@@ -12,7 +12,7 @@ test("root renders visible game UI or explicit bootstrap state", async ({ page }
   await expect(app).not.toBeEmpty();
 
   const shell = page.locator(".p1-shell");
-  const bootStatus = page.locator("[data-boot-status], .boot-status[role='alert']");
+  const bootStatus = page.locator("[data-boot-status]:visible, .boot-status[role='alert']:visible");
   await expect(shell.or(bootStatus)).toBeVisible();
 
   expect(pageErrors, `unexpected page errors: ${pageErrors.join(" | ")}`).toEqual([]);

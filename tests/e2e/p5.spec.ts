@@ -28,8 +28,10 @@ test("shows the P5 integrated slice and its three routeable spaces", async ({ pa
 });
 
 test("keeps the P5 E2E hook out of the production query", async ({ page }) => {
+  await page.evaluate(() => window.localStorage.clear());
   await page.goto("/?p5=1");
   await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
+  await expect(page.locator("#public-start-overlay")).toBeVisible();
   expect(await page.evaluate(() => typeof window.__OITATE_P5__.e2e)).toBe("undefined");
 });
 
