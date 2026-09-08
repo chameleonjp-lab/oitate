@@ -14,6 +14,12 @@ async function getP3State(page: Page): Promise<P2State> {
   return (await getP1State(page)).p3;
 }
 
+async function startLegacyPublicGame(page: Page): Promise<void> {
+  await page.locator("#public-player-name").fill("テストプレイヤー");
+  await page.locator("#public-start-button").click();
+  await expect(page.locator("#public-start-overlay")).toBeHidden();
+}
+
 function observableP2State(state: P2State) {
   return {
     capturedCount: state.capturedCount,
@@ -31,6 +37,7 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 844, height: 390 });
   await page.goto("/?p3=1");
   await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
+  await startLegacyPublicGame(page);
 });
 
 test("keeps the normal screen focused on P3 and makes P1 signals inert", async ({ page }) => {
@@ -75,10 +82,14 @@ test("keeps the P1 input probe behind an explicit development query", async ({ p
   await expect(page.locator("#signal-feedback")).toContainText("P3では動物に効果なし");
 });
 
-test("shows a readable anticipating phase before a coward flees", async ({ page }) => {
+test("keeps the legacy P3 name gate outside development fixtures", async ({ page }) => {
   await page.goto("/?p3=1");
   await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
+  await expect(page.locator("#public-start-overlay")).toBeVisible();
+  expect((await getP1State(page)).paused).toBe(true);
+});
 
+test("shows a readable anticipating phase before a coward flees", async ({ page }) => {
   const before = await getP2State(page);
   const middleBefore = before.animals.find((animal) => animal.id === "coward-2");
   expect(middleBefore).toBeTruthy();

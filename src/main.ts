@@ -927,9 +927,12 @@ const p7E2EEnabled = import.meta.env.DEV && p7Mode && query.get("p7-e2e") === "1
 const p8CheckEnabled = import.meta.env.DEV && query.get("p8-check") === "1";
 const debugEnabled = p1ProbeEnabled || p8CheckEnabled || query.get("debug") === "1";
 // The normal product entry is P7, whose stage menu owns the player-name gate.
-// The explicit P3 query is a regression surface and must remain immediately
-// inspectable without turning the old prototype into a second product entry.
-const publicStartRequired = false;
+// Legacy P3/P4/P5 entries keep their original public start gate; only their
+// explicit development E2E fixtures may bypass it. P6 owns its gate inside
+// the intro overlay and must not receive a second public overlay.
+const publicStartRequired = (p3Mode && !p1ProbeEnabled && !p3E2EEnabled)
+  || (p4Mode && !p4E2EEnabled)
+  || (p5Mode && !p5E2EEnabled);
 signalControls.hidden = !p1ProbeEnabled;
 p2Status.hidden = p4Mode || p5WorldMode;
 p4Status.hidden = !p4Mode;
