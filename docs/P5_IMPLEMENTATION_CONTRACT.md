@@ -1,6 +1,6 @@
 # P5 縦切り統合版 実装契約
 
-- 文書版：1.0
+- 文書版：1.1
 - 対象仕様：`docs/P5_FORMAL_SPEC.md`
 - 基準実装：`src/game/p5-vertical-slice-simulation.ts`
 - 開発画面：`?p5=1`
@@ -9,15 +9,16 @@
 
 | 契約 | 実装・検査 |
 |---|---|
-| 3種類11体 | `createP5Simulation()`の固定ID配列 |
+| 3種類11体 | `P5_DEFAULT_STAGE_DATA.animalSpawns`（個体数と固定IDの源） |
 | 臆病種 | `P5AnimalType.coward`、接近圧力、水場回避 |
 | 追従種 | `P5AnimalType.follower`、誘導音、橋通行 |
 | 危険種 | `P5AnimalType.predator`、攻撃段階、威嚇、救助 |
 | 地形差 | `P5Terrain`、水場、狭い橋、迂回路 |
 | 複数経路 | `discoveredRoutes.safe`、`discoveredRoutes.fast` |
 | 収容 | `penReservations`、1.15m間隔、待機/後退、0.6秒保持 |
-| 柵・経路 | `constrainCircleAgainstPenRails()`、`canTraverseToTarget()` |
+| 柵・経路 | `getPenRailSegments()`を表示・衝突で共有、`constrainCircleAgainstPenRails()`、`canTraverseToTarget()` |
 | 威嚇期限 | predator専用`threatSeconds`、4秒後の索敵復帰 |
+| 条件不足 | `evaluateP5Completion()`、`objectivesIncomplete`、未達条件付き結果オーバーレイ |
 | 仮結果 | `P5RunStatus`、画面のP5結果オーバーレイ |
 | 開発E2E | `?p5=1&p5-e2e=1`の`window.__OITATE_P5__.e2e` |
 
@@ -37,21 +38,29 @@
 - 主人公と動物はP5囲いの柵を通過せず、入口の開口だけを使う。
 - 攻撃は視線だけでなく、固定更新の移動経路が成立するときだけ確定する。
 - 失敗・クリア確定後は、再挑戦以外で状態を進めない。
+- すべての個体を収容しても必須経路・合図・順序が不足する場合は、同じ固定更新で`failed / objectivesIncomplete`へ遷移し、未達条件を表示する。条件不足をクリア扱いにはしない。
 - 非有限入力と正でない時間差では状態を進めない。
 - E2Eフックは開発時かつ`p5-e2e=1`のときだけ公開する。
 
-## 3. 既存実装との境界
+## 3. 共通面データ
+
+`src/game/stage-data.ts`の`P5StageData`が、初期配置、開始位置、囲い、地形、世界境界、完了条件、`rulesetId`を一つの面定義として保持する。シミュレーション開始時に複製し、P5/P6/P7の個体生成とP5の表示はこの定義を参照する。個体数を別の固定値として二重管理しない。
+
+`P5StageData.rulesetId`は保存記録の現行ルール識別にも使う。ルールが変わる場合は、保存契約と結果表示を同じ作業単位で更新する。
+
+## 4. 既存実装との境界
 
 P5はP3・P4の状態を直接書き換えず、専用の`P5SimulationState`を使う。P1入力所有権、横画面の一時停止、60Hz描画、20Hz判断の既存契約を維持する。
 
 P3の`window.__OITATE_P3__`、P4の`window.__OITATE_P4__`、P1診断APIを残す。P5の公開APIは`window.__OITATE_P5__`へ分離する。
 
-## 4. 検査記録
+## 5. 検査記録
 
 Draft PRには、担当設定、仕様参照、型検査、単体テスト、ビルド、Chromium E2E、P4手動受入未確認の例外承認、未確認事項、既知の危険を記録する。P5手動プレイ、iPhone実機、公開品質は自動検査と別に扱う。
 
-## 5. 変更履歴
+## 6. 変更履歴
 
 | 版 | 内容 |
 |---|---|
 | 1.0 | P5の3種類11体、地形差、複数経路、仮結果画面を固定 |
+| 1.1 | 共通面データ、柵線分の表示・衝突共有、条件不足結果を追加 |

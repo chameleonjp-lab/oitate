@@ -149,6 +149,33 @@ describe("P5 vertical-slice simulation", () => {
     expect(state.events.filter((event) => event.type === "routeDiscovered")).toHaveLength(2);
   });
 
+  it("ends with an explicit objective failure when all actors are captured too early", () => {
+    const state = createP5Simulation({
+      cowardCount: 0,
+      followerCount: 1,
+      predatorCount: 0,
+      requiredRoutes: ["fast"],
+      requiredEvents: ["animalStartedFollowing"],
+      requiredEventSequence: [],
+      requiredRouteAnimalTypes: { fast: "follower" },
+    });
+    for (const animal of state.animals) {
+      animal.lifeState = "captured";
+      animal.phase = "captured";
+    }
+
+    const result = tick(state);
+    expect(result.status).toBe("failed");
+    expect(result.failureReason).toBe("objectivesIncomplete");
+    expect(state.unmetObjectives).toEqual([
+      "追従種が速い経路を通る",
+      "誘導音で追従種を動かす",
+    ]);
+    const before = structuredClone(state);
+    tick(state, { guidanceSignal: true });
+    expect(state).toEqual(before);
+  });
+
   it("does not auto-route or auto-capture prey without the required signals", () => {
     const state = createP5Simulation();
     const predator = getAnimal(state, "predator-1");
