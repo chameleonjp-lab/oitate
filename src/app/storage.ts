@@ -13,7 +13,6 @@ export interface StorageBackend {
   setItem(key: string, value: string): void;
   removeItem?(key: string): void;
 }
-
 export interface ResilientStorage extends StorageBackend {
   removeItem(key: string): void;
 }
@@ -94,4 +93,3 @@ export function createResilientStorage(
     },
   };
 }
-
