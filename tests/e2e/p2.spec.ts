@@ -83,6 +83,7 @@ test("keeps the P1 input probe behind an explicit development query", async ({ p
 });
 
 test("keeps the legacy P3 name gate outside development fixtures", async ({ page }) => {
+  await page.evaluate(() => window.localStorage.clear());
   await page.goto("/?p3=1");
   await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
   await expect(page.locator("#public-start-overlay")).toBeVisible();
@@ -123,6 +124,7 @@ test("shows a readable anticipating phase before a coward flees", async ({ page 
 });
 
 test("uses the P7 menu at the normal product URL", async ({ page }) => {
+  await page.evaluate(() => window.localStorage.clear());
   await page.goto("/");
   await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
   await expect(page.locator("#p7-stage-menu-overlay")).toBeVisible();

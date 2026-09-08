@@ -26,6 +26,7 @@ test("shows the P4 danger slice and hides the P3 controls", async ({ page }) => 
 });
 
 test("keeps the P4 E2E hook out of the production query", async ({ page }) => {
+  await page.evaluate(() => window.localStorage.clear());
   await page.goto("/?p4=1");
   await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
   await expect(page.locator("#public-start-overlay")).toBeVisible();
