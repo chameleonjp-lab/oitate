@@ -10,11 +10,32 @@ import {
   constrainCircleAgainstPenRails,
   isPressureBlockedByPen,
 } from "./p2-cowardly-simulation";
+import {
+  cloneP5StageData,
+  createP5StageData,
+  getP5StageCounts,
+  P5_DEFAULT_STAGE_DATA,
+  type P5AnimalType,
+  type P5AnimalSpawn,
+  type P5EventType,
+  type P5Pen,
+  type P5Route,
+  type P5StageCompletion,
+  type P5StageData,
+  type P5Terrain,
+} from "./stage-data";
 
-export type P5AnimalType = "coward" | "follower" | "predator";
-export type P5Route = "safe" | "fast";
+export type {
+  P5AnimalType,
+  P5EventType,
+  P5Pen,
+  P5Route,
+  P5StageData,
+  P5Terrain,
+} from "./stage-data";
+
 export type P5RunStatus = "active" | "completed" | "failed";
-export type P5FailureReason = "none" | "rescueTimeout" | "repeatedAttack";
+export type P5FailureReason = "none" | "rescueTimeout" | "repeatedAttack" | "objectivesIncomplete";
 export type P5LifeState = "active" | "rescuePending" | "captured" | "disabled";
 export type P5AnimalPhase =
   | "idle"
@@ -31,24 +52,6 @@ export type P5AnimalPhase =
   | "rescuePending"
   | "captured"
   | "disabled";
-
-export interface P5Pen {
-  type: P5AnimalType;
-  centerX: number;
-  centerZ: number;
-  halfWidth: number;
-  halfDepth: number;
-  entranceZ: number;
-  entranceHalfWidth: number;
-  animalRadius: number;
-}
-
-export interface P5Terrain {
-  water: { minX: number; maxX: number; minZ: number; maxZ: number };
-  bridge: { minX: number; maxX: number; minZ: number; maxZ: number };
-  safeMarker: { minX: number; maxX: number; minZ: number; maxZ: number };
-  fastMarker: { minX: number; maxX: number; minZ: number; maxZ: number };
-}
 
 export interface P5AnimalState {
   id: string;
@@ -76,22 +79,6 @@ export interface P5AnimalState {
   lastMoveZ: number;
 }
 
-export type P5EventType =
-  | "routeDiscovered"
-  | "animalStartedFollowing"
-  | "animalEnteredPen"
-  | "animalCaptured"
-  | "predatorTargeted"
-  | "predatorAimStarted"
-  | "predatorLungeStarted"
-  | "victimRescuePending"
-  | "rescueSucceeded"
-  | "rescueFailed"
-  | "predatorThreatAccepted"
-  | "predatorThreatRejected"
-  | "predatorEnteredPen"
-  | "predatorCaptured";
-
 export interface P5Event {
   id: number;
   type: P5EventType;
@@ -100,31 +87,31 @@ export interface P5Event {
   reason: string;
 }
 
-export interface P5SimulationScenario {
+export interface P5SimulationScenario extends P5StageCompletion {
   cowardCount: number;
   followerCount: number;
   predatorCount: number;
-  requiredRoutes: P5Route[];
-  requiredEvents: P5EventType[];
-  requiredEventSequence: P5EventType[];
-  requiredRouteAnimalTypes: Partial<Record<P5Route, P5AnimalType>>;
+  /** Optional for legacy callers; current P5/P6/P7 stages always supply it. */
+  stageData?: P5StageData;
 }
 
-export const DEFAULT_P5_SCENARIO: P5SimulationScenario = {
-  cowardCount: 6,
-  followerCount: 4,
-  predatorCount: 1,
-  requiredRoutes: [],
-  requiredEvents: [],
-  requiredEventSequence: [],
-  requiredRouteAnimalTypes: {},
-};
+export function createP5Scenario(stageData: P5StageData): P5SimulationScenario {
+  const counts = getP5StageCounts(stageData);
+  return {
+    ...counts,
+    ...stageData.completion,
+    stageData,
+  };
+}
+
+export const DEFAULT_P5_SCENARIO: P5SimulationScenario = createP5Scenario(P5_DEFAULT_STAGE_DATA);
 
 export interface P5SimulationState {
   elapsedSeconds: number;
   status: P5RunStatus;
   failureReason: P5FailureReason;
   scenario: P5SimulationScenario;
+  stageData: P5StageData;
   animals: P5AnimalState[];
   pens: Record<P5AnimalType, P5Pen>;
   penReservations: Record<P5AnimalType, string | null>;
@@ -136,6 +123,8 @@ export interface P5SimulationState {
   threatCooldownSeconds: number;
   threatResistanceSeconds: number;
   rescueOverrideUsed: boolean;
+  /** Human-readable conditions when all bodies are captured but a stage rule is missing. */
+  unmetObjectives: string[];
 }
 
 export interface P5PlayerInput {
@@ -157,15 +146,16 @@ export interface P5StepResult {
   capturedIds: string[];
 }
 
-const WORLD_MIN = -16.5;
-const WORLD_MAX = 16.5;
 const EPSILON = 1e-7;
+const DEFAULT_P5_COUNTS = getP5StageCounts(P5_DEFAULT_STAGE_DATA);
 
 export const P5_TUNING = {
   decisionStepSeconds: 1 / 20,
-  cowardCount: 6,
-  followerCount: 4,
-  predatorCount: 1,
+  // Kept as a compatibility view for existing P5 callers. The values are
+  // derived from the shared stage definition rather than maintained twice.
+  cowardCount: DEFAULT_P5_COUNTS.cowardCount,
+  followerCount: DEFAULT_P5_COUNTS.followerCount,
+  predatorCount: DEFAULT_P5_COUNTS.predatorCount,
   cowardPressureDistance: 3.5,
   followerDurationSeconds: 4,
   followerSpeed: 1.45,
@@ -191,46 +181,10 @@ export const P5_TUNING = {
   penWaitSeconds: 0.75,
   penRetryCooldownSeconds: 0.5,
   minimumAnimalSeparation: 1.15,
-  worldMin: WORLD_MIN,
-  worldMax: WORLD_MAX,
-  terrain: {
-    water: { minX: -2.8, maxX: 2.8, minZ: -3.8, maxZ: 2.2 },
-    bridge: { minX: -0.72, maxX: 0.72, minZ: -3.8, maxZ: 2.2 },
-    safeMarker: { minX: -6.6, maxX: -4.2, minZ: -3.8, maxZ: 2.4 },
-    fastMarker: { minX: -0.95, maxX: 0.95, minZ: -3.8, maxZ: 2.4 },
-  } satisfies P5Terrain,
-  pens: {
-    coward: {
-      type: "coward",
-      centerX: -8.2,
-      centerZ: -10.2,
-      halfWidth: 3.3,
-      halfDepth: 2.1,
-      entranceZ: -8.1,
-      entranceHalfWidth: 1.8,
-      animalRadius: 0.52,
-    },
-    follower: {
-      type: "follower",
-      centerX: 8.2,
-      centerZ: -10.2,
-      halfWidth: 3.3,
-      halfDepth: 2.1,
-      entranceZ: -8.1,
-      entranceHalfWidth: 1.8,
-      animalRadius: 0.52,
-    },
-    predator: {
-      type: "predator",
-      centerX: 0,
-      centerZ: -10.8,
-      halfWidth: 2.1,
-      halfDepth: 1.7,
-      entranceZ: -9.1,
-      entranceHalfWidth: 1.05,
-      animalRadius: 0.55,
-    },
-  } satisfies Record<P5AnimalType, P5Pen>,
+  worldMin: P5_DEFAULT_STAGE_DATA.worldBounds.minX,
+  worldMax: P5_DEFAULT_STAGE_DATA.worldBounds.maxX,
+  terrain: P5_DEFAULT_STAGE_DATA.terrain,
+  pens: P5_DEFAULT_STAGE_DATA.pens,
 } as const;
 
 function clamp(value: number, min: number, max: number): number {
@@ -292,50 +246,41 @@ function createAnimal(
 export function createP5Simulation(
   scenario: P5SimulationScenario = DEFAULT_P5_SCENARIO,
 ): P5SimulationState {
-  const animals: P5AnimalState[] = [];
-  const cowardPositions: Array<[number, number]> = [
-    [-5.8, 5.7], [-4.2, 6.4], [-2.6, 5.5], [-1.0, 6.4], [0.6, 5.6], [2.2, 6.3],
-  ];
-  const cowardCount = Math.max(0, Math.floor(scenario.cowardCount));
-  const followerCount = Math.max(0, Math.floor(scenario.followerCount));
-  const predatorCount = Math.max(0, Math.floor(scenario.predatorCount));
-  for (let index = 0; index < cowardCount; index += 1) {
-    const [x, z] = cowardPositions[index] ?? [0, 6];
-    animals.push(createAnimal(`coward-${index + 1}`, "coward", x, z));
-  }
-  const followerPositions: Array<[number, number]> = [[5.2, 5.6], [6.8, 6.3], [8.4, 5.5], [10, 6.2]];
-  for (let index = 0; index < followerCount; index += 1) {
-    const [x, z] = followerPositions[index] ?? [7, 6];
-    animals.push(createAnimal(`follower-${index + 1}`, "follower", x, z));
-  }
-  if (predatorCount > 0) animals.push(createAnimal("predator-1", "predator", 3.6, 0.8));
+  const stageData = scenario.stageData
+    ? cloneP5StageData(scenario.stageData)
+    : createP5StageData(
+      "p5-runtime",
+      {
+        cowardCount: scenario.cowardCount,
+        followerCount: scenario.followerCount,
+        predatorCount: scenario.predatorCount,
+      },
+      {
+        requiredRoutes: scenario.requiredRoutes,
+        requiredEvents: scenario.requiredEvents,
+        requiredEventSequence: scenario.requiredEventSequence,
+        requiredRouteAnimalTypes: scenario.requiredRouteAnimalTypes,
+      },
+    );
+  const counts = getP5StageCounts(stageData);
+  const animals = stageData.animalSpawns.map((spawn: P5AnimalSpawn) =>
+    createAnimal(spawn.id, spawn.type, spawn.x, spawn.z));
+  const resolvedScenario: P5SimulationScenario = {
+    ...counts,
+    ...stageData.completion,
+    stageData: cloneP5StageData(stageData),
+  };
 
   return {
     elapsedSeconds: 0,
     status: "active",
     failureReason: "none",
-    scenario: {
-      cowardCount,
-      followerCount,
-      predatorCount,
-      requiredRoutes: [...scenario.requiredRoutes],
-      requiredEvents: [...scenario.requiredEvents],
-      requiredEventSequence: [...scenario.requiredEventSequence],
-      requiredRouteAnimalTypes: { ...scenario.requiredRouteAnimalTypes },
-    },
+    scenario: resolvedScenario,
+    stageData,
     animals,
-    pens: {
-      coward: { ...P5_TUNING.pens.coward },
-      follower: { ...P5_TUNING.pens.follower },
-      predator: { ...P5_TUNING.pens.predator },
-    },
+    pens: stageData.pens,
     penReservations: { coward: null, follower: null, predator: null },
-    terrain: {
-      water: { ...P5_TUNING.terrain.water },
-      bridge: { ...P5_TUNING.terrain.bridge },
-      safeMarker: { ...P5_TUNING.terrain.safeMarker },
-      fastMarker: { ...P5_TUNING.terrain.fastMarker },
-    },
+    terrain: stageData.terrain,
     discoveredRoutes: { safe: false, fast: false },
     eventSequence: 0,
     events: [],
@@ -343,6 +288,7 @@ export function createP5Simulation(
     threatCooldownSeconds: 0,
     threatResistanceSeconds: 0,
     rescueOverrideUsed: false,
+    unmetObjectives: [],
   };
 }
 
@@ -386,9 +332,10 @@ function canOccupy(
   return true;
 }
 
-function clampWorld(animal: P5AnimalState): void {
-  animal.x = clamp(animal.x, WORLD_MIN + animal.radius, WORLD_MAX - animal.radius);
-  animal.z = clamp(animal.z, WORLD_MIN + animal.radius, WORLD_MAX - animal.radius);
+function clampWorld(state: P5SimulationState, animal: P5AnimalState): void {
+  const { minX, maxX, minZ, maxZ } = state.stageData.worldBounds;
+  animal.x = clamp(animal.x, minX + animal.radius, maxX - animal.radius);
+  animal.z = clamp(animal.z, minZ + animal.radius, maxZ - animal.radius);
 }
 
 function isAnimalClearOfPeers(
@@ -412,7 +359,7 @@ function resolveAnimalOverlap(state: P5SimulationState, animal: P5AnimalState): 
     const correction = (P5_TUNING.minimumAnimalSeparation - currentDistance) + EPSILON;
     animal.x += direction.x * correction;
     animal.z += direction.z * correction;
-    clampWorld(animal);
+    clampWorld(state, animal);
   }
 }
 
@@ -421,13 +368,26 @@ export function constrainP5CircleAgainstPens(
   previous: { x: number; z: number },
   current: { x: number; z: number },
   radius: number,
+  activePenTypes?: readonly P5AnimalType[],
 ): { x: number; z: number } {
+  const allowedPenTypes = activePenTypes ? new Set(activePenTypes) : null;
   const start = { x: previous.x, z: previous.z };
   let constrained = { x: current.x, z: current.z };
-  for (const pen of Object.values(pens)) {
+  for (const [type, pen] of Object.entries(pens) as Array<[P5AnimalType, P5Pen]>) {
+    if (allowedPenTypes && !allowedPenTypes.has(type)) continue;
     constrained = constrainCircleAgainstPenRails(start, constrained, pen, radius, true);
   }
   return constrained;
+}
+
+function activePenTypes(state: P5SimulationState): Set<P5AnimalType> {
+  return new Set(state.animals.map((animal) => animal.type));
+}
+
+function activePens(state: P5SimulationState): Array<[P5AnimalType, P5Pen]> {
+  const activeTypes = activePenTypes(state);
+  return (Object.entries(state.pens) as Array<[P5AnimalType, P5Pen]>)
+    .filter(([type]) => activeTypes.has(type));
 }
 
 function constrainAnimalAgainstPens(
@@ -441,6 +401,7 @@ function constrainAnimalAgainstPens(
     { x: animal.x, z: animal.z },
     { x, z },
     animal.radius,
+    [...activePenTypes(state)],
   );
 }
 
@@ -450,11 +411,12 @@ function tryMoveCandidate(
   x: number,
   z: number,
 ): boolean {
-  const worldX = clamp(x, WORLD_MIN + animal.radius, WORLD_MAX - animal.radius);
-  const worldZ = clamp(z, WORLD_MIN + animal.radius, WORLD_MAX - animal.radius);
+  const { minX, maxX, minZ, maxZ } = state.stageData.worldBounds;
+  const worldX = clamp(x, minX + animal.radius, maxX - animal.radius);
+  const worldZ = clamp(z, minZ + animal.radius, maxZ - animal.radius);
   const constrained = constrainAnimalAgainstPens(state, animal, worldX, worldZ);
-  const finalX = clamp(constrained.x, WORLD_MIN + animal.radius, WORLD_MAX - animal.radius);
-  const finalZ = clamp(constrained.z, WORLD_MIN + animal.radius, WORLD_MAX - animal.radius);
+  const finalX = clamp(constrained.x, minX + animal.radius, maxX - animal.radius);
+  const finalZ = clamp(constrained.z, minZ + animal.radius, maxZ - animal.radius);
   if (!canOccupy(state, animal, finalX, finalZ)
     || !isAnimalClearOfPeers(state, animal, finalX, finalZ)) return false;
   if (distance(animal.x, animal.z, finalX, finalZ) <= EPSILON) return false;
@@ -489,7 +451,7 @@ function moveAnimal(
       animal.x = constrainedEscape.x;
       animal.z = constrainedEscape.z;
     }
-    clampWorld(animal);
+    clampWorld(state, animal);
     return;
   }
 
@@ -499,7 +461,7 @@ function moveAnimal(
   if (tryMoveCandidate(state, animal, nextX, nextZ)
     || tryMoveCandidate(state, animal, animal.x, nextZ)
     || tryMoveCandidate(state, animal, nextX, animal.z)) {
-    clampWorld(animal);
+    clampWorld(state, animal);
     return;
   }
 
@@ -515,14 +477,14 @@ function moveAnimal(
     )) {
       animal.lastMoveX = perpendicular.x * side;
       animal.lastMoveZ = perpendicular.z * side;
-      clampWorld(animal);
+      clampWorld(state, animal);
       return;
     }
   }
 
   animal.lastMoveX = 0;
   animal.lastMoveZ = 0;
-  clampWorld(animal);
+  clampWorld(state, animal);
 }
 
 function isInsidePen(animal: P5AnimalState, pen: P5Pen): boolean {
@@ -603,7 +565,7 @@ function canSeeTarget(
 ): boolean {
   const from = { x: predator.x, z: predator.z };
   const to = { x: target.x, z: target.z };
-  return !Object.values(state.pens).some((pen) => isPressureBlockedByPen(from, to, pen));
+  return !activePens(state).some(([, pen]) => isPressureBlockedByPen(from, to, pen));
 }
 
 function canTraverseToTarget(
@@ -630,7 +592,7 @@ function targetCanBeAttacked(
 ): boolean {
   return target.lifeState === "active"
     && target.protectionSeconds <= EPSILON
-    && !Object.values(state.pens).some((pen) => isInsidePen(target, pen))
+    && !activePens(state).some(([, pen]) => isInsidePen(target, pen))
     && canTraverseToTarget(state, predator, target);
 }
 
@@ -997,8 +959,46 @@ function hasRequiredEventSequence(state: P5SimulationState): boolean {
   return state.scenario.requiredEventSequence.length === 0;
 }
 
-function updateCompletion(state: P5SimulationState): void {
-  if (state.status !== "active") return;
+export interface P5CompletionEvaluation {
+  allPreyCaptured: boolean;
+  predatorCaptured: boolean;
+  allAnimalsCaptured: boolean;
+  routesSatisfied: boolean;
+  eventsSatisfied: boolean;
+  eventSequenceSatisfied: boolean;
+  completed: boolean;
+  unmetObjectives: string[];
+}
+
+function eventLabel(eventType: P5EventType): string {
+  const labels: Record<P5EventType, string> = {
+    routeDiscovered: "経路発見",
+    animalStartedFollowing: "誘導音で追従種を動かす",
+    animalEnteredPen: "動物の入口進入",
+    animalCaptured: "動物の収容",
+    predatorTargeted: "危険種の対象選択",
+    predatorAimStarted: "危険種の狙い予告",
+    predatorLungeStarted: "危険種の攻撃開始",
+    victimRescuePending: "保護対象の救助待ち",
+    rescueSucceeded: "保護対象の救助",
+    rescueFailed: "救助失敗",
+    predatorThreatAccepted: "威嚇音で危険種を引きつける",
+    predatorThreatRejected: "威嚇音の拒否",
+    predatorEnteredPen: "危険種の入口進入",
+    predatorCaptured: "危険種の隔離",
+  };
+  return labels[eventType];
+}
+
+function routeLabel(route: P5Route): string {
+  return route === "safe" ? "安全経路" : "速い経路";
+}
+
+function animalTypeLabel(type: P5AnimalType): string {
+  return type === "coward" ? "臆病種" : type === "follower" ? "追従種" : "危険種";
+}
+
+export function evaluateP5Completion(state: P5SimulationState): P5CompletionEvaluation {
   const preyCaptured = state.animals
     .filter((animal) => animal.type !== "predator")
     .every((animal) => animal.lifeState === "captured");
@@ -1011,9 +1011,49 @@ function updateCompletion(state: P5SimulationState): void {
     (eventType) => state.events.some((event) => event.type === eventType),
   );
   const eventSequenceSatisfied = hasRequiredEventSequence(state);
-  if (preyCaptured && predatorCaptured && routesSatisfied
-    && eventsSatisfied && eventSequenceSatisfied) {
+  const unmetObjectives: string[] = [];
+  if (!preyCaptured) unmetObjectives.push("保護対象をすべて収容する");
+  if (!predatorCaptured) unmetObjectives.push("危険種を隔離する");
+  for (const route of state.scenario.requiredRoutes) {
+    if (!hasRequiredRouteUsage(state, route)) {
+      const requiredType = state.scenario.requiredRouteAnimalTypes[route];
+      unmetObjectives.push(requiredType
+        ? `${animalTypeLabel(requiredType)}が${routeLabel(route)}を通る`
+        : `${routeLabel(route)}を発見する`);
+    }
+  }
+  for (const eventType of state.scenario.requiredEvents) {
+    if (!state.events.some((event) => event.type === eventType)) {
+      unmetObjectives.push(eventLabel(eventType));
+    }
+  }
+  if (!eventSequenceSatisfied) {
+    unmetObjectives.push(`合図の順番：${state.scenario.requiredEventSequence.map(eventLabel).join(" → ")}`);
+  }
+  const allAnimalsCaptured = preyCaptured && predatorCaptured;
+  return {
+    allPreyCaptured: preyCaptured,
+    predatorCaptured,
+    allAnimalsCaptured,
+    routesSatisfied,
+    eventsSatisfied,
+    eventSequenceSatisfied,
+    completed: allAnimalsCaptured && routesSatisfied && eventsSatisfied && eventSequenceSatisfied,
+    unmetObjectives: [...new Set(unmetObjectives)],
+  };
+}
+
+function updateCompletion(state: P5SimulationState): void {
+  if (state.status !== "active") return;
+  const evaluation = evaluateP5Completion(state);
+  state.unmetObjectives = evaluation.unmetObjectives;
+  if (evaluation.completed) {
     state.status = "completed";
+  } else if (evaluation.allAnimalsCaptured) {
+    // Do not leave a run in an unwinnable active state once every actor that
+    // could produce a required route/signal has been removed from the board.
+    state.status = "failed";
+    state.failureReason = "objectivesIncomplete";
   }
 }
 

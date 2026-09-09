@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculateP7Result,
   createP7Progress,
+  getP7LegacyStageRecord,
   getP7Stage,
   isP7Complete,
   isP7StageUnlocked,
@@ -61,6 +62,21 @@ describe("P7 1.0 content progression", () => {
     ]);
   });
 
+  it("derives every P7 simulation from its shared stage data", () => {
+    for (const stage of [0, 1, 2, 3, 4, 5, 6] as const) {
+      const definition = getP7Stage(stage);
+      const state = createP5Simulation(definition.simulation);
+      expect(definition.simulation.stageData).toBe(definition.stageData);
+      expect(state.stageData.id).toBe(definition.stageData.id);
+      expect(state.stageData.rulesetId).toBe(definition.stageData.rulesetId);
+      expect(state.animals.map((animal) => animal.id)).toEqual(
+        definition.stageData.animalSpawns.map((spawn) => spawn.id),
+      );
+      expect(state.pens).toEqual(definition.stageData.pens);
+      expect(state.terrain).toEqual(definition.stageData.terrain);
+    }
+  });
+
   it("does not complete a stage until its required concept was used", () => {
     const stage = getP7Stage(3);
     const state = createP5Simulation(stage.simulation);
@@ -70,17 +86,24 @@ describe("P7 1.0 content progression", () => {
     }
 
     stepP5Simulation(state, { x: 0, z: 0, speed: 0, isRunning: false }, 0.05);
-    expect(state.status).toBe("active");
+    expect(state.status).toBe("failed");
+    expect(state.failureReason).toBe("objectivesIncomplete");
+    expect(state.unmetObjectives).toContain("威嚇音で危険種を引きつける");
 
-    state.events.push({
+    const completedState = createP5Simulation(stage.simulation);
+    for (const animal of completedState.animals) {
+      animal.lifeState = "captured";
+      animal.phase = "captured";
+    }
+    completedState.events.push({
       id: 1,
       type: "predatorThreatAccepted",
       atSeconds: 1,
       subjectId: "predator-1",
       reason: "p7-test",
     });
-    stepP5Simulation(state, { x: 0, z: 0, speed: 0, isRunning: false }, 0.05);
-    expect(state.status).toBe("completed");
+    stepP5Simulation(completedState, { x: 0, z: 0, speed: 0, isRunning: false }, 0.05);
+    expect(completedState.status).toBe("completed");
   });
 
   it("enforces ordered signals and role-specific route use", () => {
@@ -107,9 +130,15 @@ describe("P7 1.0 content progression", () => {
       },
     ];
     stepP5Simulation(stage4State, { x: 0, z: 0, speed: 0, isRunning: false }, 0.05);
-    expect(stage4State.status).toBe("active");
+    expect(stage4State.status).toBe("failed");
+    expect(stage4State.failureReason).toBe("objectivesIncomplete");
 
-    stage4State.events = [
+    const orderedStage4State = createP5Simulation(stage4.simulation);
+    for (const animal of orderedStage4State.animals) {
+      animal.lifeState = "captured";
+      animal.phase = "captured";
+    }
+    orderedStage4State.events = [
       {
         id: 1,
         type: "animalStartedFollowing",
@@ -125,8 +154,8 @@ describe("P7 1.0 content progression", () => {
         reason: "test",
       },
     ];
-    stepP5Simulation(stage4State, { x: 0, z: 0, speed: 0, isRunning: false }, 0.05);
-    expect(stage4State.status).toBe("completed");
+    stepP5Simulation(orderedStage4State, { x: 0, z: 0, speed: 0, isRunning: false }, 0.05);
+    expect(orderedStage4State.status).toBe("completed");
 
     const stage5 = getP7Stage(5);
     const stage5State = createP5Simulation(stage5.simulation);
@@ -153,9 +182,17 @@ describe("P7 1.0 content progression", () => {
       },
     ];
     stepP5Simulation(stage5State, { x: 0, z: 0, speed: 0, isRunning: false }, 0.05);
-    expect(stage5State.status).toBe("active");
+    expect(stage5State.status).toBe("failed");
+    expect(stage5State.failureReason).toBe("objectivesIncomplete");
 
-    stage5State.events = [
+    const validStage5State = createP5Simulation(stage5.simulation);
+    for (const animal of validStage5State.animals) {
+      animal.lifeState = "captured";
+      animal.phase = "captured";
+    }
+    validStage5State.discoveredRoutes.safe = true;
+    validStage5State.discoveredRoutes.fast = true;
+    validStage5State.events = [
       {
         id: 1,
         type: "routeDiscovered",
@@ -171,8 +208,8 @@ describe("P7 1.0 content progression", () => {
         reason: "fast",
       },
     ];
-    stepP5Simulation(stage5State, { x: 0, z: 0, speed: 0, isRunning: false }, 0.05);
-    expect(stage5State.status).toBe("completed");
+    stepP5Simulation(validStage5State, { x: 0, z: 0, speed: 0, isRunning: false }, 0.05);
+    expect(validStage5State.status).toBe("completed");
   });
 
   it("requires all seven stage 4 animals and states the same objective", () => {
@@ -207,16 +244,38 @@ describe("P7 1.0 content progression", () => {
     stepP5Simulation(state, { x: 0, z: 0, speed: 0, isRunning: false }, 0.05);
     expect(state.status).toBe("active");
 
-    const predator = state.animals.find((animal) => animal.type === "predator");
+    const completedState = createP5Simulation(stage.simulation);
+    for (const animal of completedState.animals.filter((candidate) => candidate.type !== "predator")) {
+      animal.lifeState = "captured";
+      animal.phase = "captured";
+    }
+    completedState.events = [
+      {
+        id: 1,
+        type: "animalStartedFollowing",
+        atSeconds: 1,
+        subjectId: "follower-1",
+        reason: "test",
+      },
+      {
+        id: 2,
+        type: "predatorThreatAccepted",
+        atSeconds: 2,
+        subjectId: "predator-1",
+        reason: "test",
+      },
+    ];
+    const predator = completedState.animals.find((animal) => animal.type === "predator");
     if (!predator) throw new Error("stage 4 test predator is missing");
     predator.lifeState = "captured";
     predator.phase = "captured";
-    stepP5Simulation(state, { x: 0, z: 0, speed: 0, isRunning: false }, 0.05);
-    expect(state.status).toBe("completed");
+    stepP5Simulation(completedState, { x: 0, z: 0, speed: 0, isRunning: false }, 0.05);
+    expect(completedState.status).toBe("completed");
   });
 
   it("unlocks the next stage, keeps best records, and gates the fourth animal", () => {
     let progress = createP7Progress();
+    expect(progress.rulesetId).toBe("oitate-stage-v2");
     expect(isP7StageUnlocked(progress, 1)).toBe(true);
     for (const stageId of [1, 2, 3, 4, 5, 6] as const) {
       progress = updateP7Progress(progress, makeCompletedResult(stageId));
@@ -235,9 +294,94 @@ describe("P7 1.0 content progression", () => {
     const progress = updateP7Progress(createP7Progress(), makeCompletedResult(1));
     writeP7Progress(progress, storage);
     const restored = readP7Progress(storage);
+    expect(restored.rulesetId).toBe("oitate-stage-v2");
     expect(restored.completedStageIds).toEqual([1]);
     expect(restored.unlockedStageIds).toEqual([0, 1, 2]);
     expect(restored.records[1]?.standard?.mode).toBe("standard");
+    expect(restored.records[1]?.standard?.rulesetId).toBe("oitate-stage-v2");
+    const written = JSON.parse(storage.getItem("oitate:p7:progress:v1") ?? "null") as Record<string, unknown>;
+    expect(written.rulesetId).toBe("oitate-stage-v2");
+  });
+
+  it("rejects current fields from missing or mismatched v2 payloads while preserving embedded legacy access", () => {
+    const storage = new MemoryStorage();
+    const legacy = {
+      version: 1,
+      completedStageIds: [1],
+      unlockedStageIds: [0, 1, 2],
+      records: {
+        1: { bestScore: 1_234, bestGrade: "B", bestTimeSeconds: 90, attempts: 2 },
+      },
+      fourthAnimalGate: "locked",
+    };
+    const currentRecord = {
+      stageId: 6,
+      rulesetId: "oitate-stage-v2",
+      mode: "standard",
+      bestScore: 9_999,
+      bestGrade: "S",
+      bestTimeSeconds: 20,
+      attempts: 1,
+    };
+
+    for (const rulesetId of [undefined, "oitate-stage-v1"]) {
+      const payload: Record<string, unknown> = {
+        version: 2,
+        completedStageIds: [6],
+        unlockedStageIds: [0, 1, 6],
+        records: { 6: { standard: currentRecord } },
+        fourthAnimalGate: "eligible",
+        legacy,
+      };
+      if (rulesetId !== undefined) payload.rulesetId = rulesetId;
+      storage.setItem("oitate:p7:progress:v1", JSON.stringify(payload));
+
+      const restored = readP7Progress(storage);
+      expect(restored.rulesetId).toBe("oitate-stage-v2");
+      expect(restored.completedStageIds).toEqual([]);
+      expect(restored.unlockedStageIds).toEqual([0, 1, 2]);
+      expect(restored.records).toEqual({});
+      expect(restored.fourthAnimalGate).toBe("locked");
+      expect(restored.legacy?.completedStageIds).toEqual([1]);
+      expect(getP7LegacyStageRecord(restored, 1, "standard")).toMatchObject({
+        bestScore: 1_234,
+        rulesetId: "oitate-stage-v1",
+      });
+    }
+  });
+
+  it("keeps version-one clears as read-only legacy records during migration", () => {
+    const storage = new MemoryStorage();
+    const legacyPayload = {
+      version: 1,
+      completedStageIds: [1, 2],
+      unlockedStageIds: [0, 1, 2],
+      records: {
+        // Old saves used a stage-level record without stageId or mode.
+        1: { bestScore: 4_200, bestGrade: "B", bestTimeSeconds: 180, attempts: 3 },
+        2: {
+          standard: { stageId: 2, mode: "standard", bestScore: 6_000, bestGrade: "A", bestTimeSeconds: 140, attempts: 1 },
+        },
+      },
+      fourthAnimalGate: "eligible",
+    };
+    storage.setItem("oitate:p7:progress:v1", JSON.stringify(legacyPayload));
+
+    const restored = readP7Progress(storage);
+    expect(restored.version).toBe(2);
+    expect(restored.completedStageIds).toEqual([]);
+    expect(restored.unlockedStageIds).toEqual([0, 1, 2]);
+    expect(restored.fourthAnimalGate).toBe("locked");
+    expect(restored.legacy?.completedStageIds).toEqual([1, 2]);
+    expect(restored.legacy?.fourthAnimalGate).toBe("eligible");
+    expect(getP7LegacyStageRecord(restored, 1, "standard")).toMatchObject({
+      bestScore: 4_200,
+      mode: "standard",
+      rulesetId: "oitate-stage-v1",
+    });
+    expect(getP7LegacyStageRecord(restored, 2, "standard")?.bestGrade).toBe("A");
+    // Reading alone must not overwrite the player's old payload.
+    expect(storage.getItem("oitate:p7:progress:v1")).toBe(JSON.stringify(legacyPayload));
   });
 
   it("keeps practice, standard, and assisted records separate", () => {

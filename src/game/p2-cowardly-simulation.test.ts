@@ -5,6 +5,7 @@ import {
   P2_TUNING,
   constrainCircleAgainstPenRails,
   createP2Simulation,
+  getPenRailSegments,
   getPressureBand,
   isFullBodyInsidePen,
   isPressureBlockedByPen,
@@ -304,6 +305,30 @@ describe("P2 cowardly animal prototype", () => {
       radius,
     );
     expect(diagonal.z).toBeGreaterThanOrEqual(pen.entranceZ + radius - 1e-3);
+  });
+
+  it("exposes the exact finite rail segments used by collision and display", () => {
+    const rails = getPenRailSegments(DEFAULT_P2_PEN, true);
+    const leftX = DEFAULT_P2_PEN.centerX - DEFAULT_P2_PEN.halfWidth;
+    const backZ = DEFAULT_P2_PEN.centerZ - DEFAULT_P2_PEN.halfDepth;
+    const frontZ = DEFAULT_P2_PEN.entranceZ;
+    expect(rails).toEqual(expect.arrayContaining([
+      { startX: leftX, startZ: backZ, endX: leftX, endZ: frontZ },
+    ]));
+    const frontRails = rails.filter((rail) =>
+      rail.startZ === frontZ && rail.endZ === frontZ,
+    );
+    expect(frontRails).toHaveLength(2);
+    expect(frontRails.every((rail) =>
+      Math.abs(rail.endX - rail.startX)
+        === DEFAULT_P2_PEN.halfWidth - DEFAULT_P2_PEN.entranceHalfWidth,
+    )).toBe(true);
+    expect(rails.every((rail) =>
+      Number.isFinite(rail.startX)
+      && Number.isFinite(rail.startZ)
+      && Number.isFinite(rail.endX)
+      && Number.isFinite(rail.endZ),
+    )).toBe(true);
   });
 
   it("passes only through the opening and uses the same circle constraint for the player", () => {

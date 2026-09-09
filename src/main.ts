@@ -13,6 +13,7 @@ import {
 } from "./game/movement";
 import {
   constrainCircleAgainstPenRails,
+  getPenRailSegments,
 } from "./game/p2-cowardly-simulation";
 import {
   createP3Simulation,
@@ -41,6 +42,12 @@ import {
   type P5FailureReason,
   type P5SimulationState,
 } from "./game/p5-vertical-slice-simulation";
+import {
+  P5_DEFAULT_STAGE_DATA,
+  getP5StageCounts,
+  type P5Pen,
+  type P5StageData,
+} from "./game/stage-data";
 import { FixedStepSimulation } from "./game/fixed-step";
 import {
   createResilientStorage,
@@ -64,6 +71,7 @@ import {
 } from "./game/p6-vertical-slice-completion";
 import {
   calculateP7Result,
+  getP7LegacyStageRecord,
   getP7Stage,
   getP7StageRecord,
   isP7StageUnlocked,
@@ -189,6 +197,7 @@ interface P4PublicApi {
 interface P5PublicState {
   status: P5SimulationState["status"];
   failureReason: P5FailureReason;
+  unmetObjectives: string[];
   elapsedSeconds: number;
   capturedCount: Record<P5AnimalType, number>;
   discoveredRoutes: P5SimulationState["discoveredRoutes"];
@@ -254,6 +263,7 @@ interface P7PublicState {
 interface P7E2ETestHooks {
   openStage: (stageId: P7StageId) => void;
   runCompletionReplay: () => void;
+  runObjectiveIncompleteReplay: () => void;
 }
 
 type P8MediaScene = "position" | "signal" | "danger";
@@ -1233,7 +1243,7 @@ const p4PredatorVisual = createP4ActorVisual(0xe56f61, 0xffb38e, 1.1);
 const p4VictimVisual = createP4ActorVisual(0x7cc9d8, 0x9fe8f0, 0.82);
 
 function createP5PenVisual(
-  pen: P5SimulationState["pens"][P5AnimalType],
+  pen: P5Pen,
   floorColor: number,
   railColor: number,
 ): THREE.Group {
@@ -1250,85 +1260,193 @@ function createP5PenVisual(
   floor.position.set(pen.centerX, 0.06, pen.centerZ);
   group.add(floor);
   const railMaterial = new THREE.MeshStandardMaterial({ color: railColor, roughness: 0.82 });
-  const leftX = pen.centerX - pen.halfWidth;
-  const rightX = pen.centerX + pen.halfWidth;
-  const backZ = pen.centerZ - pen.halfDepth;
-  const frontZ = pen.entranceZ;
-  for (const x of [leftX, rightX]) {
-    for (const z of [backZ, frontZ]) {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 1.5, 8), railMaterial);
-      post.position.set(x, 0.75, z);
-      group.add(post);
-    }
-    const side = new THREE.Mesh(
-      new THREE.BoxGeometry(0.15, 0.15, pen.halfDepth * 2),
+  const rails = getPenRailSegments(pen, true);
+  const postKeys = new Set<string>();
+  for (const rail of rails) {
+    const deltaX = rail.endX - rail.startX;
+    const deltaZ = rail.endZ - rail.startZ;
+    const length = Math.hypot(deltaX, deltaZ);
+    if (length <= 0) continue;
+    const horizontal = Math.abs(deltaX) >= Math.abs(deltaZ);
+    const mesh = new THREE.Mesh(
+      horizontal
+        ? new THREE.BoxGeometry(length, 0.15, 0.15)
+        : new THREE.BoxGeometry(0.15, 0.15, length),
       railMaterial,
     );
-    side.position.set(x, 1.28, pen.centerZ - pen.halfDepth / 2);
-    group.add(side);
-  }
-  const back = new THREE.Mesh(
-    new THREE.BoxGeometry(pen.halfWidth * 2, 0.15, 0.15),
-    railMaterial,
-  );
-  back.position.set(pen.centerX, 1.28, backZ);
-  group.add(back);
-  const railLength = pen.halfWidth - pen.entranceHalfWidth;
-  for (const x of [
-    pen.centerX - (pen.halfWidth + pen.entranceHalfWidth) / 2,
-    pen.centerX + (pen.halfWidth + pen.entranceHalfWidth) / 2,
-  ]) {
-    const front = new THREE.Mesh(new THREE.BoxGeometry(railLength, 0.15, 0.15), railMaterial);
-    front.position.set(x, 1.28, frontZ);
-    group.add(front);
+    mesh.position.set(
+      (rail.startX + rail.endX) / 2,
+      1.28,
+      (rail.startZ + rail.endZ) / 2,
+    );
+    group.add(mesh);
+    for (const endpoint of [
+      { x: rail.startX, z: rail.startZ },
+      { x: rail.endX, z: rail.endZ },
+    ]) {
+      const key = `${endpoint.x}:${endpoint.z}`;
+      if (postKeys.has(key)) continue;
+      postKeys.add(key);
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 1.5, 8), railMaterial);
+      post.position.set(endpoint.x, 0.75, endpoint.z);
+      group.add(post);
+    }
   }
   scene.add(group);
   return group;
 }
 
+function disposeObject3D(object: THREE.Object3D): void {
+  object.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    child.geometry.dispose();
+    const material = child.material;
+    if (Array.isArray(material)) {
+      for (const entry of material) entry.dispose();
+    } else {
+      material.dispose();
+    }
+  });
+}
+
+function syncP5PenVisual(
+  visual: THREE.Group,
+  pen: P5Pen,
+  floorColor: number,
+  railColor: number,
+): void {
+  // Stage definitions are immutable, but P5/P7 can swap the active definition
+  // between runs. Rebuild this small group so rendering always consumes the
+  // same finite rail segments as the active collision geometry.
+  for (const child of [...visual.children]) {
+    visual.remove(child);
+    disposeObject3D(child);
+  }
+  const rebuilt = createP5PenVisual(pen, floorColor, railColor);
+  scene.remove(rebuilt);
+  for (const child of [...rebuilt.children]) {
+    rebuilt.remove(child);
+    visual.add(child);
+  }
+  disposeObject3D(rebuilt);
+}
+
 const p5TerrainVisual = new THREE.Group();
 const p5Water = new THREE.Mesh(
   new THREE.PlaneGeometry(
-    P5_TUNING.terrain.water.maxX - P5_TUNING.terrain.water.minX,
-    P5_TUNING.terrain.water.maxZ - P5_TUNING.terrain.water.minZ,
+    P5_DEFAULT_STAGE_DATA.terrain.water.maxX - P5_DEFAULT_STAGE_DATA.terrain.water.minX,
+    P5_DEFAULT_STAGE_DATA.terrain.water.maxZ - P5_DEFAULT_STAGE_DATA.terrain.water.minZ,
   ),
   new THREE.MeshStandardMaterial({ color: 0x3f9fc2, roughness: 0.32, transparent: true, opacity: 0.78 }),
 );
 p5Water.rotation.x = -Math.PI / 2;
 p5Water.position.set(
-  (P5_TUNING.terrain.water.minX + P5_TUNING.terrain.water.maxX) / 2,
+  (P5_DEFAULT_STAGE_DATA.terrain.water.minX + P5_DEFAULT_STAGE_DATA.terrain.water.maxX) / 2,
   0.035,
-  (P5_TUNING.terrain.water.minZ + P5_TUNING.terrain.water.maxZ) / 2,
+  (P5_DEFAULT_STAGE_DATA.terrain.water.minZ + P5_DEFAULT_STAGE_DATA.terrain.water.maxZ) / 2,
 );
 p5TerrainVisual.add(p5Water);
 const p5Bridge = new THREE.Mesh(
   new THREE.PlaneGeometry(
-    P5_TUNING.terrain.bridge.maxX - P5_TUNING.terrain.bridge.minX,
-    P5_TUNING.terrain.bridge.maxZ - P5_TUNING.terrain.bridge.minZ,
+    P5_DEFAULT_STAGE_DATA.terrain.bridge.maxX - P5_DEFAULT_STAGE_DATA.terrain.bridge.minX,
+    P5_DEFAULT_STAGE_DATA.terrain.bridge.maxZ - P5_DEFAULT_STAGE_DATA.terrain.bridge.minZ,
   ),
   new THREE.MeshStandardMaterial({ color: 0xc59b61, roughness: 0.82 }),
 );
 p5Bridge.rotation.x = -Math.PI / 2;
 p5Bridge.position.set(
-  (P5_TUNING.terrain.bridge.minX + P5_TUNING.terrain.bridge.maxX) / 2,
+  (P5_DEFAULT_STAGE_DATA.terrain.bridge.minX + P5_DEFAULT_STAGE_DATA.terrain.bridge.maxX) / 2,
   0.055,
-  (P5_TUNING.terrain.bridge.minZ + P5_TUNING.terrain.bridge.maxZ) / 2,
+  (P5_DEFAULT_STAGE_DATA.terrain.bridge.minZ + P5_DEFAULT_STAGE_DATA.terrain.bridge.maxZ) / 2,
 );
 p5TerrainVisual.add(p5Bridge);
 scene.add(p5TerrainVisual);
 
 const p5PenVisuals: Record<P5AnimalType, THREE.Group> = {
-  coward: createP5PenVisual(P5_TUNING.pens.coward, 0x83b86d, 0xb6e48c),
-  follower: createP5PenVisual(P5_TUNING.pens.follower, 0x6c9dcc, 0x9dd6ee),
-  predator: createP5PenVisual(P5_TUNING.pens.predator, 0x9b6e69, 0xf09a7e),
+  coward: createP5PenVisual(P5_DEFAULT_STAGE_DATA.pens.coward, 0x83b86d, 0xb6e48c),
+  follower: createP5PenVisual(P5_DEFAULT_STAGE_DATA.pens.follower, 0x6c9dcc, 0x9dd6ee),
+  predator: createP5PenVisual(P5_DEFAULT_STAGE_DATA.pens.predator, 0x9b6e69, 0xf09a7e),
 };
 const p5FollowerVisuals: P4Visual[] = [];
-for (let index = 0; index < P5_TUNING.followerCount; index += 1) {
+for (let index = 0; index < getP5StageCounts(P5_DEFAULT_STAGE_DATA).followerCount; index += 1) {
   p5FollowerVisuals.push(createP4ActorVisual(0x8c98e8, 0xb6b8ff, 0.9));
 }
 const p5PredatorVisual = createP4ActorVisual(0xe56f61, 0xffb38e, 1.08);
+const p5BoundaryVisual = new THREE.Group();
+const p5BoundaryMaterial = new THREE.MeshStandardMaterial({
+  color: 0xd1e59a,
+  roughness: 0.8,
+  transparent: true,
+  opacity: 0.78,
+});
+const p5WorldBounds = P5_DEFAULT_STAGE_DATA.worldBounds;
+const p5BoundaryWidth = p5WorldBounds.maxX - p5WorldBounds.minX;
+const p5BoundaryDepth = p5WorldBounds.maxZ - p5WorldBounds.minZ;
+for (const z of [p5WorldBounds.minZ, p5WorldBounds.maxZ]) {
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(p5BoundaryWidth, 0.12, 0.16), p5BoundaryMaterial);
+  rail.position.set((p5WorldBounds.minX + p5WorldBounds.maxX) / 2, 0.08, z);
+  p5BoundaryVisual.add(rail);
+}
+for (const x of [p5WorldBounds.minX, p5WorldBounds.maxX]) {
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, p5BoundaryDepth), p5BoundaryMaterial);
+  rail.position.set(x, 0.08, (p5WorldBounds.minZ + p5WorldBounds.maxZ) / 2);
+  p5BoundaryVisual.add(rail);
+}
+scene.add(p5BoundaryVisual);
+
+function syncP5StageVisuals(stageData: P5StageData): void {
+  const water = stageData.terrain.water;
+  const defaultWater = P5_DEFAULT_STAGE_DATA.terrain.water;
+  p5Water.scale.set(
+    (water.maxX - water.minX) / (defaultWater.maxX - defaultWater.minX),
+    (water.maxZ - water.minZ) / (defaultWater.maxZ - defaultWater.minZ),
+    1,
+  );
+  p5Water.position.set(
+    (water.minX + water.maxX) / 2,
+    0.035,
+    (water.minZ + water.maxZ) / 2,
+  );
+
+  const bridge = stageData.terrain.bridge;
+  const defaultBridge = P5_DEFAULT_STAGE_DATA.terrain.bridge;
+  p5Bridge.scale.set(
+    (bridge.maxX - bridge.minX) / (defaultBridge.maxX - defaultBridge.minX),
+    (bridge.maxZ - bridge.minZ) / (defaultBridge.maxZ - defaultBridge.minZ),
+    1,
+  );
+  p5Bridge.position.set(
+    (bridge.minX + bridge.maxX) / 2,
+    0.055,
+    (bridge.minZ + bridge.maxZ) / 2,
+  );
+
+  syncP5PenVisual(p5PenVisuals.coward, stageData.pens.coward, 0x83b86d, 0xb6e48c);
+  syncP5PenVisual(p5PenVisuals.follower, stageData.pens.follower, 0x6c9dcc, 0x9dd6ee);
+  syncP5PenVisual(p5PenVisuals.predator, stageData.pens.predator, 0x9b6e69, 0xf09a7e);
+
+  const bounds = stageData.worldBounds;
+  const rails = p5BoundaryVisual.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh);
+  const [south, north, west, east] = rails;
+  if (south && north && west && east) {
+    south.geometry.dispose();
+    south.geometry = new THREE.BoxGeometry(bounds.maxX - bounds.minX, 0.12, 0.16);
+    south.position.set((bounds.minX + bounds.maxX) / 2, 0.08, bounds.minZ);
+    north.geometry.dispose();
+    north.geometry = new THREE.BoxGeometry(bounds.maxX - bounds.minX, 0.12, 0.16);
+    north.position.set((bounds.minX + bounds.maxX) / 2, 0.08, bounds.maxZ);
+    west.geometry.dispose();
+    west.geometry = new THREE.BoxGeometry(0.16, 0.12, bounds.maxZ - bounds.minZ);
+    west.position.set(bounds.minX, 0.08, (bounds.minZ + bounds.maxZ) / 2);
+    east.geometry.dispose();
+    east.geometry = new THREE.BoxGeometry(0.16, 0.12, bounds.maxZ - bounds.minZ);
+    east.position.set(bounds.maxX, 0.08, (bounds.minZ + bounds.maxZ) / 2);
+  }
+}
+
 p5TerrainVisual.visible = p5WorldMode;
 for (const visual of Object.values(p5PenVisuals)) visual.visible = p5WorldMode;
+p5BoundaryVisual.visible = p5WorldMode;
 p4PenVisual.visible = p4Mode;
 p4PredatorVisual.group.visible = p4Mode;
 p4VictimVisual.group.visible = p4Mode;
@@ -1363,6 +1481,7 @@ let p7StageId: P7StageId = 0;
 let p5Simulation: P5SimulationState = createP5Simulation(
   p7Mode ? getP7Stage(p7StageId).simulation : undefined,
 );
+syncP5StageVisuals(p5Simulation.stageData);
 const P5_DECISION_SECONDS = P5_TUNING.decisionStepSeconds;
 const PLAYER_COLLISION_RADIUS = 0.52;
 let p3DecisionAccumulator = 0;
@@ -1517,7 +1636,11 @@ recordP8Event(
 );
 
 if (p5WorldMode) {
-  simulationPosition.set(0, 0, 7.5);
+  simulationPosition.set(
+    p5Simulation.stageData.playerSpawn.x,
+    0,
+    p5Simulation.stageData.playerSpawn.z,
+  );
   previousSimulationPosition.copy(simulationPosition);
   player.position.copy(simulationPosition);
 } else if (p4Mode) {
@@ -1916,6 +2039,7 @@ function resetP5Prototype(): void {
   p5Simulation = createP5Simulation(
     p7Mode ? getP7Stage(p7StageId).simulation : undefined,
   );
+  syncP5StageVisuals(p5Simulation.stageData);
   updateAnimalLabel();
   p5DecisionAccumulator = 0;
   p5DecisionUpdates = 0;
@@ -1930,7 +2054,8 @@ function resetP5Prototype(): void {
   p7ResultShown = false;
   p7Metrics = createP6RunMetrics(p6Settings.assistedMode);
   p5StatusText.textContent = "臆病種は接近、追従種は誘導音、危険種は威嚇音に反応します";
-  p5CountText.textContent = "臆病 0 / 6　追従 0 / 4　危険 0 / 1";
+  const { cowardCount, followerCount, predatorCount } = p5Simulation.scenario;
+  p5CountText.textContent = `臆病 0 / ${cowardCount}　追従 0 / ${followerCount}　危険 0 / ${predatorCount}`;
   p5DangerText.textContent = "危険種：索敵　保護対象：待機中";
   p5RouteText.textContent = "安全な経路 ○　速い経路 ○";
   p6ResultOverlay.hidden = true;
@@ -1938,7 +2063,11 @@ function resetP5Prototype(): void {
   p6IntroOverlay.hidden = true;
   if (p7Mode) updateP7Status();
   else updateP6Status();
-  simulationPosition.set(0, 0, 7.5);
+  simulationPosition.set(
+    p5Simulation.stageData.playerSpawn.x,
+    0,
+    p5Simulation.stageData.playerSpawn.z,
+  );
   previousSimulationPosition.copy(simulationPosition);
   player.position.copy(simulationPosition);
   simulationRotationY = 0;
@@ -2005,9 +2134,27 @@ function p7ModeName(): P7RecordMode {
     : p6Settings.assistedMode ? "assisted" : "standard";
 }
 
+function formatP7RecordSummary(
+  record: ReturnType<typeof getP7StageRecord>,
+  legacyRecord: ReturnType<typeof getP7LegacyStageRecord>,
+  prefix: string,
+  legacyPrefix: string,
+  emptyText: string,
+): string {
+  const currentText = record
+    ? `${prefix}${record.bestScore.toLocaleString("ja-JP")}点 / ${record.bestGrade}`
+    : "";
+  const legacyText = legacyRecord
+    ? `${legacyPrefix}${legacyRecord.bestScore.toLocaleString("ja-JP")}点 / ${legacyRecord.bestGrade}（現行とは別）`
+    : "";
+  if (currentText && legacyText) return `${currentText}　${legacyText}`;
+  return currentText || legacyText || emptyText;
+}
+
 function updateP7Status(): void {
   const stage = getP7Stage(p7StageId);
   const record = getP7StageRecord(p7Progress, p7StageId, p7ModeName());
+  const legacyRecord = getP7LegacyStageRecord(p7Progress, p7StageId, p7ModeName());
   const completedCount = P7_STAGE_IDS.filter(
     (stageId) => stageId > 0 && p7Progress.completedStageIds.includes(stageId),
   ).length;
@@ -2019,9 +2166,13 @@ function updateP7Status(): void {
       ? "失敗理由を確認し、次に変える行動を選びます"
       : stage.objective;
   p7ProgressText.textContent = `進行 ${completedCount} / 6　収容 臆病 ${counts.coward} / ${p5Simulation.scenario.cowardCount}　追従 ${counts.follower} / ${p5Simulation.scenario.followerCount}　危険 ${counts.predator} / ${p5Simulation.scenario.predatorCount}`;
-  p7StageRecordText.textContent = record
-    ? `${p7SettingsLabel()}の最高記録 ${record.bestScore.toLocaleString("ja-JP")}点 / ${record.bestGrade}`
-    : `${p7SettingsLabel()}の記録 --`;
+  p7StageRecordText.textContent = formatP7RecordSummary(
+    record,
+    legacyRecord,
+    `${p7SettingsLabel()}の最高記録 `,
+    "旧版の参考記録 ",
+    `${p7SettingsLabel()}の記録 --`,
+  );
 }
 
 function p7SettingsLabel(): string {
@@ -2034,15 +2185,27 @@ function renderP7StageMenu(): void {
   const completedCount = P7_STAGE_IDS.filter(
     (stageId) => stageId > 0 && p7Progress.completedStageIds.includes(stageId),
   ).length;
-  p7StageMenuSummary.textContent = `${completedCount} / 6面をクリア。各面は中心概念を一つに絞り、クリアすると次の面が開きます。`;
+  const legacyCompletedCount = P7_STAGE_IDS.filter(
+    (stageId) => stageId > 0 && (p7Progress.legacy?.completedStageIds.includes(stageId) ?? false),
+  ).length;
+  p7StageMenuSummary.textContent = legacyCompletedCount > 0
+    ? `${completedCount} / 6面を現行ルールでクリア。旧版クリア ${legacyCompletedCount}面は引き継ぎ済みですが、現行記録とは分けて表示します。`
+    : `${completedCount} / 6面をクリア。各面は中心概念を一つに絞り、クリアすると次の面が開きます。`;
   p7FourthGate.textContent = p7Progress.fourthAnimalGate === "eligible"
     ? "第4の動物：6面クリア後の検証候補。通常の1.0面にはまだ追加しません。"
     : "第4の動物：6面の受入確認後に検証";
   p7StageList.innerHTML = P7_STAGES.map((stage) => {
     const unlocked = isP7StageUnlocked(p7Progress, stage.id);
     const completed = p7Progress.completedStageIds.includes(stage.id);
+    const legacyCompleted = p7Progress.legacy?.completedStageIds.includes(stage.id) ?? false;
     const current = stage.id === p7StageId;
-    const status = completed ? "クリア済み" : unlocked ? "開始できます" : "未解放";
+    const status = completed && legacyCompleted
+      ? "現行・旧版クリア済み"
+      : completed
+        ? "現行クリア済み"
+        : legacyCompleted
+          ? "旧版クリア・現行未クリア"
+          : unlocked ? "開始できます" : "未解放";
     return `<article class="p7-stage-card${current ? " is-current" : ""}${completed ? " is-completed" : ""}">
       <button type="button" data-p7-stage="${stage.id}" ${unlocked ? "" : "disabled"} aria-label="${stage.title} ${status}">
         <span class="p7-stage-card-title">${stage.title}</span>
@@ -2105,21 +2268,32 @@ function populateP7Result(): void {
   const completed = p7Result.completed;
   const stage = getP7Stage(p7Result.stageId);
   p7ResultEyebrow.textContent = completed ? `P7 ${stage.title} 完了` : `P7 ${stage.title} 失敗`;
-  p7ResultTitle.textContent = completed ? "面をクリアしました" : "今回は収容できませんでした";
+  p7ResultTitle.textContent = completed
+    ? "面をクリアしました"
+    : p5Simulation.failureReason === "objectivesIncomplete"
+      ? "収容は完了しましたが、面の条件が不足しています"
+      : "今回は収容できませんでした";
   p7ResultScore.textContent = completed ? `${p7Result.totalScore.toLocaleString("ja-JP")}点` : "未クリア";
   p7ResultGrade.textContent = completed ? `評価 ${p7Result.grade}` : "評価 —";
   p7ResultTitleText.textContent = completed
     ? p7Result.titles.join("・")
-    : "次の試行で変える内容を一つ選びます";
+    : p5Simulation.unmetObjectives.length > 0
+      ? `不足：${p5Simulation.unmetObjectives.join("、")}`
+      : "次の試行で変える内容を一つ選びます";
   p7ScoreSafety.textContent = completed ? p7Result.breakdown.safety.toLocaleString("ja-JP") : "—";
   p7ScoreCoordination.textContent = completed ? p7Result.breakdown.coordination.toLocaleString("ja-JP") : "—";
   p7ScoreJudgement.textContent = completed ? p7Result.breakdown.judgement.toLocaleString("ja-JP") : "—";
   p7ScoreTime.textContent = completed ? p7Result.breakdown.time.toLocaleString("ja-JP") : "—";
   p7ResultAdvice.textContent = `次回の助言： ${p7Result.advice}`;
   const record = getP7StageRecord(p7Progress, p7StageId, p7ModeName());
-  p7ResultRecord.textContent = record
-    ? `${p7SettingsLabel()}のこの面の最高記録：${record.bestScore.toLocaleString("ja-JP")}点 / ${record.bestGrade}`
-    : "この面の記録はまだありません";
+  const legacyRecord = getP7LegacyStageRecord(p7Progress, p7StageId, p7ModeName());
+  p7ResultRecord.textContent = formatP7RecordSummary(
+    record,
+    legacyRecord,
+    `${p7SettingsLabel()}のこの面の最高記録：`,
+    "旧版の参考記録：",
+    "この面の記録はまだありません",
+  );
   prepareP7ResultPlatform();
 }
 
@@ -2177,14 +2351,20 @@ function populateP6Result(): void {
   if (!p6Result) return;
   const completed = p6Result.completed;
   p6ResultEyebrow.textContent = completed ? "P6 縦切り完成版 完了" : "P6 縦切り完成版 失敗";
-  p6ResultTitle.textContent = completed ? "結果を確認してください" : "今回は収容できませんでした";
+  p6ResultTitle.textContent = completed
+    ? "結果を確認してください"
+    : p5Simulation.failureReason === "objectivesIncomplete"
+      ? "収容は完了しましたが、面の条件が不足しています"
+      : "今回は収容できませんでした";
   p6ResultScore.textContent = completed
     ? p6Result.totalScore.toLocaleString("ja-JP") + "点"
     : "未クリア";
   p6ResultGrade.textContent = completed ? "評価 " + p6Result.grade : "評価 —";
   p6ResultTitleText.textContent = completed
     ? p6Result.titles.join("・")
-    : "次の試行で変える内容を一つ選びます";
+    : p5Simulation.unmetObjectives.length > 0
+      ? `不足：${p5Simulation.unmetObjectives.join("、")}`
+      : "次の試行で変える内容を一つ選びます";
   p6ScoreSafety.textContent = completed ? p6Result.breakdown.safety.toLocaleString("ja-JP") : "—";
   p6ScoreCoordination.textContent = completed ? p6Result.breakdown.coordination.toLocaleString("ja-JP") : "—";
   p6ScoreJudgement.textContent = completed ? p6Result.breakdown.judgement.toLocaleString("ja-JP") : "—";
@@ -2296,15 +2476,22 @@ function showP5Result(): void {
     ? "P5 縦切り統合版 完了"
     : "P5 縦切り統合版 失敗";
   if (p5Simulation.status === "completed") {
-    p5ResultTitle.textContent = "3種類11体を収容しました";
-    p5ResultText.textContent = `臆病 ${counts.coward} / 6　追従 ${counts.follower} / 4　危険 ${counts.predator} / 1`;
+    const { cowardCount, followerCount, predatorCount } = p5Simulation.scenario;
+    p5ResultTitle.textContent = "すべての動物を収容しました";
+    p5ResultText.textContent = `臆病 ${counts.coward} / ${cowardCount}　追従 ${counts.follower} / ${followerCount}　危険 ${counts.predator} / ${predatorCount}`;
     p5ResultDetail.textContent = `発見した経路：${routes.safe ? "安全" : "未発見"}・${routes.fast ? "速い" : "未発見"}。結果は仮表示です。`;
+  } else if (p5Simulation.failureReason === "objectivesIncomplete") {
+    p5ResultEyebrow.textContent = "P5 縦切り統合版 条件不足";
+    p5ResultTitle.textContent = "収容は完了しましたが、面の条件が不足しています";
+    p5ResultText.textContent = p5Simulation.unmetObjectives.join("、") || "必須条件を満たしていません";
+    p5ResultDetail.textContent = "条件を確認して、もう一度試してください。結果は保存されません。";
   } else {
     p5ResultTitle.textContent = "危険種への対応に失敗しました";
     p5ResultText.textContent = p5Simulation.failureReason === "rescueTimeout"
       ? "救助待ちの時間を過ぎました。次は狙いの段階で引きつけます。"
       : "救助後に再び攻撃を許しました。危険種を先に隔離します。";
-    p5ResultDetail.textContent = `収容：臆病 ${counts.coward} / 6　追従 ${counts.follower} / 4　危険 ${counts.predator} / 1。発見経路：${routes.safe ? "安全" : "未発見"}・${routes.fast ? "速い" : "未発見"}。失敗理由：${p5Simulation.failureReason}。結果は仮表示です。`;
+    const { cowardCount, followerCount, predatorCount } = p5Simulation.scenario;
+    p5ResultDetail.textContent = `収容：臆病 ${counts.coward} / ${cowardCount}　追従 ${counts.follower} / ${followerCount}　危険 ${counts.predator} / ${predatorCount}。発見経路：${routes.safe ? "安全" : "未発見"}・${routes.fast ? "速い" : "未発見"}。失敗理由：${p5Simulation.failureReason}。結果は仮表示です。`;
   }
   p5ResultOverlay.hidden = false;
   blockInteraction(p5RetryButton);
@@ -2802,6 +2989,31 @@ function runP7CompletionReplay(): void {
   clearSimulationDebt();
 }
 
+function runP7ObjectiveIncompleteReplay(): void {
+  if (!p7Mode) return;
+  p7ResultOverlay.hidden = true;
+  if (interactionLayer.inert) unblockInteraction();
+  resetP5Prototype();
+  paused = false;
+  resumeRequired = false;
+
+  // Stage 2 has both a route and a signal objective. Marking every actor as
+  // captured without satisfying either objective exercises the production
+  // objective-incomplete transition and its no-progress/no-record path.
+  for (const animal of p5Simulation.animals) {
+    animal.lifeState = "captured";
+    animal.phase = "captured";
+    animal.insidePen = true;
+    animal.captureHoldSeconds = 0;
+    animal.previousX = animal.x;
+    animal.previousZ = animal.z;
+    animal.lastMoveX = 0;
+    animal.lastMoveZ = 0;
+  }
+  stepP5DecisionAtPlayer(0, 0, 0, false, P5_DECISION_SECONDS);
+  clearSimulationDebt();
+}
+
 function prepareMediaStage(stageId: P7StageId): void {
   if (!p7Mode) return;
   if (!p7Progress.unlockedStageIds.includes(stageId)) {
@@ -3020,7 +3232,8 @@ function updateAnimalLabel(): void {
 
 function updateP5Status(): void {
   const counts = getP5CapturedCounts();
-  p5CountText.textContent = `臆病 ${counts.coward} / 6　追従 ${counts.follower} / 4　危険 ${counts.predator} / 1`;
+  const { cowardCount, followerCount, predatorCount } = p5Simulation.scenario;
+  p5CountText.textContent = `臆病 ${counts.coward} / ${cowardCount}　追従 ${counts.follower} / ${followerCount}　危険 ${counts.predator} / ${predatorCount}`;
   p5RouteText.textContent = `安全な経路 ${p5Simulation.discoveredRoutes.safe ? "●" : "○"}　速い経路 ${p5Simulation.discoveredRoutes.fast ? "●" : "○"}`;
   const predator = p5Simulation.animals.find((animal) => animal.type === "predator");
   const victim = p5Simulation.animals.find((animal) => animal.id === "coward-1");
@@ -3042,13 +3255,18 @@ function updateP5Status(): void {
   };
   p5DangerText.textContent = `危険種：${predator ? predatorLabels[predator.phase] : "不明"}　保護対象：${victim?.lifeState ?? "不明"}`;
   if (p5Simulation.status === "completed") {
-    p5StatusText.textContent = "3種類11体を、それぞれの囲いへ収容しました";
+    const typeCount = [cowardCount, followerCount, predatorCount]
+      .filter((count) => count > 0).length;
+    const totalCount = cowardCount + followerCount + predatorCount;
+    p5StatusText.textContent = `${typeCount}種類${totalCount}体を、それぞれの囲いへ収容しました`;
     return;
   }
   if (p5Simulation.status === "failed") {
     p5StatusText.textContent = p5Simulation.failureReason === "rescueTimeout"
       ? "救助待ちの時間を過ぎました"
-      : "救助後に危険種の再攻撃を許しました";
+      : p5Simulation.failureReason === "repeatedAttack"
+        ? "救助後に危険種の再攻撃を許しました"
+        : `収容後も未達条件があります：${p5Simulation.unmetObjectives.join("、")}`;
     return;
   }
   if (victim?.lifeState === "rescuePending") {
@@ -3278,11 +3496,13 @@ function constrainP5PlayerMovement(
   previous: THREE.Vector3,
   current: THREE.Vector3,
 ): { x: number; z: number } {
+  const activePenTypes = [...new Set(p5Simulation.animals.map((animal) => animal.type))];
   return constrainP5CircleAgainstPens(
     p5Simulation.pens,
     { x: previous.x, z: previous.z },
     { x: current.x, z: current.z },
     PLAYER_COLLISION_RADIUS,
+    activePenTypes,
   );
 }
 
@@ -3300,15 +3520,18 @@ function simulate(stepSeconds: number): void {
       snapshot.joystickY,
       snapshot.movementBasisYaw,
     );
+    const worldBounds = p5WorldMode
+      ? p5Simulation.stageData.worldBounds
+      : P5_DEFAULT_STAGE_DATA.worldBounds;
     simulationPosition.x = THREE.MathUtils.clamp(
       simulationPosition.x + direction.x * speed * stepSeconds,
-      -16.5,
-      16.5,
+      worldBounds.minX,
+      worldBounds.maxX,
     );
     simulationPosition.z = THREE.MathUtils.clamp(
       simulationPosition.z + direction.z * speed * stepSeconds,
-      -16.5,
-      16.5,
+      worldBounds.minZ,
+      worldBounds.maxZ,
     );
     if (p5WorldMode) {
       const constrainedPlayer = constrainP5PlayerMovement(
@@ -3556,6 +3779,14 @@ function getP7PublicState(): P7PublicState {
       completedStageIds: [...p7Progress.completedStageIds],
       unlockedStageIds: [...p7Progress.unlockedStageIds],
       records: { ...p7Progress.records },
+      legacy: p7Progress.legacy
+        ? {
+            ...p7Progress.legacy,
+            completedStageIds: [...p7Progress.legacy.completedStageIds],
+            unlockedStageIds: [...p7Progress.legacy.unlockedStageIds],
+            records: { ...p7Progress.legacy.records },
+          }
+        : null,
     },
     result: p7Result,
   };
@@ -3566,6 +3797,7 @@ function getP5PublicState(): P5PublicState {
   return {
     status: p5Simulation.status,
     failureReason: p5Simulation.failureReason,
+    unmetObjectives: [...p5Simulation.unmetObjectives],
     elapsedSeconds: p5Simulation.elapsedSeconds,
     capturedCount: counts,
     discoveredRoutes: { ...p5Simulation.discoveredRoutes },
@@ -3782,6 +4014,7 @@ const p7Api: P7PublicApi = {
             startP7Stage(stageId);
           },
           runCompletionReplay: runP7CompletionReplay,
+          runObjectiveIncompleteReplay: runP7ObjectiveIncompleteReplay,
           prepareMediaScene,
         },
       }

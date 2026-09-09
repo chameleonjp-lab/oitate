@@ -213,7 +213,8 @@ export function isFullBodyInsidePen(
     && animal.z <= bounds.maxZ;
 }
 
-interface RailSegment {
+/** A finite visible/collidable segment of a pen rail. */
+export interface PenRailSegment {
   startX: number;
   startZ: number;
   endX: number;
@@ -230,12 +231,12 @@ interface RailSweepHit {
 const GEOMETRY_EPSILON = 1e-7;
 const RAIL_SEPARATION = 1e-4;
 
-function getPenRails(pen: P2Pen, entranceOpen: boolean): RailSegment[] {
+export function getPenRailSegments(pen: P2Pen, entranceOpen: boolean): PenRailSegment[] {
   const leftX = pen.centerX - pen.halfWidth;
   const rightX = pen.centerX + pen.halfWidth;
   const backZ = pen.centerZ - pen.halfDepth;
   const frontZ = pen.entranceZ;
-  const rails: RailSegment[] = [
+  const rails: PenRailSegment[] = [
     { startX: leftX, startZ: backZ, endX: rightX, endZ: backZ },
     { startX: leftX, startZ: backZ, endX: leftX, endZ: frontZ },
     { startX: rightX, startZ: backZ, endX: rightX, endZ: frontZ },
@@ -256,7 +257,7 @@ function getPenRails(pen: P2Pen, entranceOpen: boolean): RailSegment[] {
 function centerLineIntersectsRail(
   start: P2PlayerPosition,
   end: P2PlayerPosition,
-  rail: RailSegment,
+  rail: PenRailSegment,
 ): boolean {
   const deltaX = end.x - start.x;
   const deltaZ = end.z - start.z;
@@ -297,14 +298,14 @@ export function isPressureBlockedByPen(
   animal: P2PlayerPosition,
   pen: P2Pen,
 ): boolean {
-  return getPenRails(pen, true).some((rail) =>
+  return getPenRailSegments(pen, true).some((rail) =>
     centerLineIntersectsRail(player, animal, rail));
 }
 
 function closestPointOnRail(
   x: number,
   z: number,
-  rail: RailSegment,
+  rail: PenRailSegment,
 ): { x: number; z: number } {
   const railX = rail.endX - rail.startX;
   const railZ = rail.endZ - rail.startZ;
@@ -339,7 +340,7 @@ function sweepCircleAgainstRail(
   start: P2PlayerPosition,
   deltaX: number,
   deltaZ: number,
-  rail: RailSegment,
+  rail: PenRailSegment,
   radius: number,
 ): RailSweepHit | null {
   let hit: RailSweepHit | null = null;
@@ -447,7 +448,7 @@ function sweepCircleAgainstEntrancePortal(
 }
 
 function deterministicRailNormal(
-  rail: RailSegment,
+  rail: PenRailSegment,
   pen: P2Pen,
 ): { x: number; z: number } {
   if (Math.abs(rail.startZ - rail.endZ) < GEOMETRY_EPSILON) {
@@ -458,7 +459,7 @@ function deterministicRailNormal(
 
 function resolveRailOverlaps(
   position: { x: number; z: number },
-  rails: RailSegment[],
+  rails: PenRailSegment[],
   pen: P2Pen,
   radius: number,
 ): void {
@@ -502,7 +503,7 @@ export function constrainCircleAgainstPenRails(
     x: finiteOr(current.x, start.x),
     z: finiteOr(current.z, start.z),
   };
-  const rails = getPenRails(pen, entranceOpen);
+  const rails = getPenRailSegments(pen, entranceOpen);
 
   // A closed entrance can be applied after ownership changes. An unowned
   // body already in the radius-wide throat is recovered to the outside,

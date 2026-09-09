@@ -6,6 +6,7 @@ import {
   stepP5Simulation,
   type P5AnimalState,
 } from "./p5-vertical-slice-simulation";
+import { P5_DEFAULT_STAGE_DATA } from "./stage-data";
 
 function animalById(state: ReturnType<typeof createP5Simulation>, id: string): P5AnimalState {
   const animal = state.animals.find((candidate) => candidate.id === id);
@@ -22,7 +23,7 @@ describe("P5 movement regressions", () => {
     // coward-1 is exactly against the left world edge. The player pushes it
     // toward -Z while an active coward blocks the direct path. The negative-X
     // fallback cannot move at all, so the open positive-X side must be tried.
-    moving.x = P5_TUNING.worldMin + moving.radius;
+    moving.x = P5_DEFAULT_STAGE_DATA.worldBounds.minX + moving.radius;
     moving.z = 5;
     moving.previousX = moving.x;
     moving.previousZ = moving.z;

@@ -7,12 +7,17 @@ import {
   type P6Storage,
 } from "./p6-vertical-slice-completion";
 import {
-  type P5AnimalType,
-  type P5EventType,
-  type P5Route,
+  createP5Scenario,
   type P5SimulationScenario,
   type P5SimulationState,
 } from "./p5-vertical-slice-simulation";
+import {
+  createP5StageData,
+  P5_STAGE_RULESET_ID,
+  type P5StageCompletion,
+  type P5StageCounts,
+  type P5StageData,
+} from "./stage-data";
 
 export type P7StageId = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 export type P7RecordMode = P6RecordMode | "practice";
@@ -25,12 +30,14 @@ export interface P7StageDefinition {
   center: string;
   description: string;
   objective: string;
+  stageData: P5StageData;
   simulation: P5SimulationScenario;
   isPractice: boolean;
 }
 
 export interface P7StageRecord {
   stageId: P7StageId;
+  rulesetId: string;
   mode: P7RecordMode;
   bestScore: number;
   bestGrade: Exclude<P7Grade, "未クリア">;
@@ -39,6 +46,17 @@ export interface P7StageRecord {
 }
 
 export interface P7Progress {
+  version: 2;
+  /** Identifies the rules that current progress and records were earned with. */
+  rulesetId: typeof P5_STAGE_RULESET_ID;
+  completedStageIds: P7StageId[];
+  unlockedStageIds: P7StageId[];
+  records: Partial<Record<P7StageId, Partial<Record<P7RecordMode, P7StageRecord>>>>;
+  fourthAnimalGate: P7FourthAnimalGate;
+  legacy: P7LegacyProgress | null;
+}
+
+export interface P7LegacyProgress {
   version: 1;
   completedStageIds: P7StageId[];
   unlockedStageIds: P7StageId[];
@@ -54,122 +72,44 @@ export interface P7Storage extends P6Storage {}
 
 export const P7_STAGE_IDS: readonly P7StageId[] = [0, 1, 2, 3, 4, 5, 6];
 
-function scenario(
-  cowardCount: number,
-  followerCount: number,
-  predatorCount: number,
-  requiredRoutes: P5Route[] = [],
-  requiredEvents: P5EventType[] = [],
-  requiredRouteAnimalTypes: Partial<Record<P5Route, P5AnimalType>> = {},
-  requiredEventSequence: P5EventType[] = [],
-): P5SimulationScenario {
+function stage(
+  id: P7StageId,
+  title: string,
+  center: string,
+  description: string,
+  objective: string,
+  counts: P5StageCounts,
+  completion: P5StageCompletion,
+  isPractice: boolean,
+): P7StageDefinition {
+  const stageData = createP5StageData(`p7-stage-${id}`, counts, completion);
   return {
-    cowardCount,
-    followerCount,
-    predatorCount,
-    requiredRoutes,
-    requiredEvents,
-    requiredRouteAnimalTypes,
-    requiredEventSequence,
+    id,
+    title,
+    center,
+    description,
+    objective,
+    stageData,
+    simulation: createP5Scenario(stageData),
+    isPractice,
   };
 }
 
 export const P7_STAGES: readonly P7StageDefinition[] = [
-  {
-    id: 0,
-    title: "練習",
-    center: "安全に操作を試す",
-    description: "主人公を動かし、臆病種を囲いへ導く短い練習です。得点は参考表示です。",
-    objective: "臆病種2体を囲いへ収容する",
-    simulation: scenario(2, 0, 0),
-    isPractice: true,
-  },
-  {
-    id: 1,
-    title: "1　接近圧力",
-    center: "位置取りで動かす",
-    description: "近づく距離と歩く速さを変え、臆病種の群れを整えます。",
-    objective: "臆病種6体を広い囲いへ収容する",
-    simulation: scenario(6, 0, 0),
-    isPractice: false,
-  },
-  {
-    id: 2,
-    title: "2　誘導音と経路",
-    center: "合図と地形を使う",
-    description: "誘導音で追従種を動かし、浅い水を避けるか橋を使って進めます。",
-    objective: "誘導音を使い、速い経路を発見して追従種4体を収容する",
-    simulation: scenario(
-      0,
-      4,
-      0,
-      ["fast"],
-      ["animalStartedFollowing"],
-      { fast: "follower" },
-    ),
-    isPractice: false,
-  },
-  {
-    id: 3,
-    title: "3　危険管理",
-    center: "危険種を先に隔離する",
-    description: "狙いの予備動作を見て、威嚇音で危険種を主人公へ引きつけます。",
-    objective: "威嚇音を使い、危険種と保護対象を専用囲いへ収容する",
-    simulation: scenario(1, 0, 1, [], ["predatorThreatAccepted"]),
-    isPractice: false,
-  },
-  {
-    id: 4,
-    title: "4　合図の副作用",
-    center: "合図の順番を選ぶ",
-    description: "誘導音で追従種を動かした後、威嚇音で危険種を引きつけます。順番を変えると状況も変わります。",
-    objective: "誘導音の後に威嚇音を使い、保護対象6体を収容し、危険種1体を隔離する",
-    simulation: scenario(
-      3,
-      3,
-      1,
-      [],
-      ["animalStartedFollowing", "predatorThreatAccepted"],
-      {},
-      ["animalStartedFollowing", "predatorThreatAccepted"],
-    ),
-    isPractice: false,
-  },
-  {
-    id: 5,
-    title: "5　群れの分裂",
-    center: "狭い経路を順番に使う",
-    description: "臆病種は安全経路、追従種は速い経路を使います。群れを一度に押し込まず、順番を選びます。",
-    objective: "安全経路を臆病種、速い経路を追従種が通り、10体を収容する",
-    simulation: scenario(
-      6,
-      4,
-      0,
-      ["safe", "fast"],
-      [],
-      { safe: "coward", fast: "follower" },
-    ),
-    isPractice: false,
-  },
-  {
-    id: 6,
-    title: "6　総合",
-    center: "3種類を同時に管理する",
-    description: "これまでの3種類、地形、2つの経路、2種類の合図を組み合わせます。",
-    objective: "安全経路を臆病種、速い経路を追従種が通り、2種類の合図を使って11体を収容する",
-    simulation: scenario(
-      6,
-      4,
-      1,
-      ["safe", "fast"],
-      ["animalStartedFollowing", "predatorThreatAccepted"],
-      { safe: "coward", fast: "follower" },
-    ),
-    isPractice: false,
-  },
+  stage(0, "練習", "安全に操作を試す", "主人公を動かし、臆病種を囲いへ導く短い練習です。得点は参考表示です。", "臆病種2体を囲いへ収容する", { cowardCount: 2, followerCount: 0, predatorCount: 0 }, { requiredRoutes: [], requiredEvents: [], requiredEventSequence: [], requiredRouteAnimalTypes: {} }, true),
+  stage(1, "1　接近圧力", "位置取りで動かす", "近づく距離と歩く速さを変え、臆病種の群れを整えます。", "臆病種6体を広い囲いへ収容する", { cowardCount: 6, followerCount: 0, predatorCount: 0 }, { requiredRoutes: [], requiredEvents: [], requiredEventSequence: [], requiredRouteAnimalTypes: {} }, false),
+  stage(2, "2　誘導音と経路", "合図と地形を使う", "誘導音で追従種を動かし、浅い水を避けるか橋を使って進めます。", "誘導音を使い、速い経路を発見して追従種4体を収容する", { cowardCount: 0, followerCount: 4, predatorCount: 0 }, { requiredRoutes: ["fast"], requiredEvents: ["animalStartedFollowing"], requiredEventSequence: [], requiredRouteAnimalTypes: { fast: "follower" } }, false),
+  stage(3, "3　危険管理", "危険種を先に隔離する", "狙いの予備動作を見て、威嚇音で危険種を主人公へ引きつけます。", "威嚇音を使い、危険種と保護対象を専用囲いへ収容する", { cowardCount: 1, followerCount: 0, predatorCount: 1 }, { requiredRoutes: [], requiredEvents: ["predatorThreatAccepted"], requiredEventSequence: [], requiredRouteAnimalTypes: {} }, false),
+  stage(4, "4　合図の副作用", "合図の順番を選ぶ", "誘導音で追従種を動かした後、威嚇音で危険種を引きつけます。順番を変えると状況も変わります。", "誘導音の後に威嚇音を使い、保護対象6体を収容し、危険種1体を隔離する", { cowardCount: 3, followerCount: 3, predatorCount: 1 }, { requiredRoutes: [], requiredEvents: ["animalStartedFollowing", "predatorThreatAccepted"], requiredEventSequence: ["animalStartedFollowing", "predatorThreatAccepted"], requiredRouteAnimalTypes: {} }, false),
+  stage(5, "5　群れの分裂", "狭い経路を順番に使う", "臆病種は安全経路、追従種は速い経路を使います。群れを一度に押し込まず、順番を選びます。", "安全経路を臆病種、速い経路を追従種が通り、10体を収容する", { cowardCount: 6, followerCount: 4, predatorCount: 0 }, { requiredRoutes: ["safe", "fast"], requiredEvents: [], requiredEventSequence: [], requiredRouteAnimalTypes: { safe: "coward", fast: "follower" } }, false),
+  stage(6, "6　総合", "3種類を同時に管理する", "これまでの3種類、地形、2つの経路、2種類の合図を組み合わせます。", "安全経路を臆病種、速い経路を追従種が通り、2種類の合図を使って11体を収容する", { cowardCount: 6, followerCount: 4, predatorCount: 1 }, { requiredRoutes: ["safe", "fast"], requiredEvents: ["animalStartedFollowing", "predatorThreatAccepted"], requiredEventSequence: [], requiredRouteAnimalTypes: { safe: "coward", fast: "follower" } }, false),
 ];
 
+// Keep the storage key stable for existing players; the payload version and
+// ruleset id separate current records from the old P7 implementation.
 const PROGRESS_KEY = "oitate:p7:progress:v1";
+const CURRENT_PROGRESS_VERSION = 2;
+const LEGACY_RULESET_ID = "oitate-stage-v1";
 
 function resolveStorage(storage?: P7Storage): P7Storage | null {
   if (storage) return storage;
@@ -204,19 +144,34 @@ function isRecordMode(value: unknown): value is P7RecordMode {
   return value === "standard" || value === "assisted" || value === "practice";
 }
 
-function parseRecord(value: unknown, expectedMode?: P7RecordMode): P7StageRecord | null {
+function parseRecord(
+  value: unknown,
+  expectedMode: P7RecordMode | undefined,
+  expectedStageId: P7StageId | undefined,
+  rulesetId: string,
+  allowMissingStageId: boolean,
+): P7StageRecord | null {
   const object = asObject(value);
-  const mode = expectedMode ?? object?.mode;
-  if (!object || !isStageId(object.stageId)
+  const mode = expectedMode
+    ?? (isRecordMode(object?.mode)
+      ? object.mode
+      : allowMissingStageId && expectedStageId !== undefined
+        ? expectedStageId === 0 ? "practice" : "standard"
+        : object?.mode);
+  const stageId = object && isStageId(object.stageId) ? object.stageId : expectedStageId;
+  if (!object || stageId === undefined || (!allowMissingStageId && !isStageId(object.stageId))
+    || (expectedStageId !== undefined && stageId !== expectedStageId)
+    || (!allowMissingStageId && object.rulesetId !== rulesetId)
     || !isRecordMode(mode)
-    || typeof object.bestScore !== "number"
+    || typeof object.bestScore !== "number" || !Number.isFinite(object.bestScore)
     || !isGrade(object.bestGrade)
-    || typeof object.bestTimeSeconds !== "number"
-    || typeof object.attempts !== "number") {
+    || typeof object.bestTimeSeconds !== "number" || !Number.isFinite(object.bestTimeSeconds)
+    || typeof object.attempts !== "number" || !Number.isFinite(object.attempts)) {
     return null;
   }
   return {
-    stageId: object.stageId,
+    stageId,
+    rulesetId,
     mode,
     bestScore: Math.max(0, Math.min(100_000, Math.round(object.bestScore))),
     bestGrade: object.bestGrade,
@@ -227,6 +182,25 @@ function parseRecord(value: unknown, expectedMode?: P7RecordMode): P7StageRecord
 
 export function createP7Progress(): P7Progress {
   return {
+    version: CURRENT_PROGRESS_VERSION,
+    rulesetId: P5_STAGE_RULESET_ID,
+    completedStageIds: [],
+    unlockedStageIds: [0, 1],
+    records: {},
+    fourthAnimalGate: "locked",
+    legacy: null,
+  };
+}
+
+function normalizeUnlockedStageIds(value: unknown, fallback: P7StageId[]): P7StageId[] {
+  const unlocked = uniqueStageIds(value, fallback);
+  if (!unlocked.includes(0)) unlocked.unshift(0);
+  if (!unlocked.includes(1)) unlocked.push(1);
+  return unlocked.sort((first, second) => first - second);
+}
+
+function emptyLegacyProgress(): P7LegacyProgress {
+  return {
     version: 1,
     completedStageIds: [],
     unlockedStageIds: [0, 1],
@@ -235,40 +209,118 @@ export function createP7Progress(): P7Progress {
   };
 }
 
+function parseRecordSet(
+  value: unknown,
+  expectedStageId: P7StageId,
+  rulesetId: string,
+  legacy: boolean,
+): Partial<Record<P7RecordMode, P7StageRecord>> {
+  const parsedSet: Partial<Record<P7RecordMode, P7StageRecord>> = {};
+  const directRecord = parseRecord(
+    value,
+    undefined,
+    expectedStageId,
+    rulesetId,
+    legacy,
+  );
+  if (directRecord) {
+    parsedSet[directRecord.mode] = directRecord;
+    return parsedSet;
+  }
+  const recordSet = asObject(value);
+  if (!recordSet) return parsedSet;
+  for (const mode of ["standard", "assisted", "practice"] as const) {
+    const record = parseRecord(
+      recordSet[mode],
+      mode,
+      expectedStageId,
+      rulesetId,
+      legacy,
+    );
+    if (record) parsedSet[mode] = record;
+  }
+  return parsedSet;
+}
+
+function parseRecords(
+  value: unknown,
+  rulesetId: string,
+  legacy: boolean,
+): Partial<Record<P7StageId, Partial<Record<P7RecordMode, P7StageRecord>>>> {
+  const records: Partial<Record<P7StageId, Partial<Record<P7RecordMode, P7StageRecord>>>> = {};
+  const source = asObject(value);
+  if (!source) return records;
+  for (const [key, recordValue] of Object.entries(source)) {
+    const stageId = Number(key);
+    if (!isStageId(stageId)) continue;
+    const parsedSet = parseRecordSet(recordValue, stageId, rulesetId, legacy);
+    if (Object.keys(parsedSet).length > 0) records[stageId] = parsedSet;
+  }
+  return records;
+}
+
+function parseLegacyProgress(parsed: Record<string, unknown>): P7LegacyProgress {
+  const legacy = emptyLegacyProgress();
+  legacy.completedStageIds = uniqueStageIds(parsed.completedStageIds, []);
+  legacy.unlockedStageIds = normalizeUnlockedStageIds(parsed.unlockedStageIds, [0, 1]);
+  legacy.records = parseRecords(parsed.records, LEGACY_RULESET_ID, true);
+  legacy.fourthAnimalGate = parsed.fourthAnimalGate === "eligible" ? "eligible" : "locked";
+  return legacy;
+}
+
+function readCurrentProgress(parsed: Record<string, unknown>): P7Progress {
+  const progress = createP7Progress();
+  const legacyObject = asObject(parsed.legacy);
+  if (legacyObject && legacyObject.version === 1) {
+    progress.legacy = parseLegacyProgress(legacyObject);
+  }
+
+  // Version 2 payloads are current only when the top-level ruleset matches.
+  // Keep an embedded legacy payload available even when a stale or malformed
+  // v2 payload is encountered, but never let its current fields leak into the
+  // current progression namespace.
+  if (parsed.rulesetId !== P5_STAGE_RULESET_ID) {
+    if (progress.legacy) {
+      progress.unlockedStageIds = normalizeUnlockedStageIds(
+        progress.legacy.unlockedStageIds,
+        [0, 1],
+      );
+    }
+    return progress;
+  }
+
+  progress.completedStageIds = uniqueStageIds(parsed.completedStageIds, []);
+  progress.unlockedStageIds = normalizeUnlockedStageIds(parsed.unlockedStageIds, [0, 1]);
+  progress.records = parseRecords(parsed.records, P5_STAGE_RULESET_ID, false);
+  progress.fourthAnimalGate = parsed.fourthAnimalGate === "eligible" ? "eligible" : "locked";
+  if (progress.legacy) {
+    progress.unlockedStageIds = normalizeUnlockedStageIds([
+      ...progress.unlockedStageIds,
+      ...progress.legacy.unlockedStageIds,
+    ], [0, 1]);
+  }
+  return progress;
+}
+
 export function readP7Progress(storage?: P7Storage): P7Progress {
   const source = resolveStorage(storage);
   try {
     const raw = source?.getItem(PROGRESS_KEY);
     if (!raw) return createP7Progress();
     const parsed = asObject(JSON.parse(raw));
-    if (!parsed || parsed.version !== 1) return createP7Progress();
-    const progress = createP7Progress();
-    progress.completedStageIds = uniqueStageIds(parsed.completedStageIds, []);
-    progress.unlockedStageIds = uniqueStageIds(parsed.unlockedStageIds, [0, 1]);
-    if (!progress.unlockedStageIds.includes(0)) progress.unlockedStageIds.unshift(0);
-    if (!progress.unlockedStageIds.includes(1)) progress.unlockedStageIds.push(1);
-    const records = asObject(parsed.records);
-    if (records) {
-      for (const [key, value] of Object.entries(records)) {
-        const stageId = Number(key);
-        if (!isStageId(stageId)) continue;
-        const directRecord = parseRecord(value);
-        if (directRecord) {
-          progress.records[stageId] = { [directRecord.mode]: directRecord };
-          continue;
-        }
-        const recordSet = asObject(value);
-        if (!recordSet) continue;
-        const parsedSet: Partial<Record<P7RecordMode, P7StageRecord>> = {};
-        for (const mode of ["standard", "assisted", "practice"] as const) {
-          const record = parseRecord(recordSet[mode], mode);
-          if (record) parsedSet[mode] = record;
-        }
-        if (Object.keys(parsedSet).length > 0) progress.records[stageId] = parsedSet;
-      }
+    if (!parsed) return createP7Progress();
+    if (parsed.version === CURRENT_PROGRESS_VERSION) return readCurrentProgress(parsed);
+    if (parsed.version === 1) {
+      const progress = createP7Progress();
+      progress.legacy = parseLegacyProgress(parsed);
+      // Old clears keep their access, but never count as current-rule clears.
+      progress.unlockedStageIds = normalizeUnlockedStageIds(
+        progress.legacy.unlockedStageIds,
+        [0, 1],
+      );
+      return progress;
     }
-    progress.fourthAnimalGate = parsed.fourthAnimalGate === "eligible" ? "eligible" : "locked";
-    return progress;
+    return createP7Progress();
   } catch {
     return createP7Progress();
   }
@@ -277,7 +329,11 @@ export function readP7Progress(storage?: P7Storage): P7Progress {
 export function writeP7Progress(progress: P7Progress, storage?: P7Storage): void {
   const source = resolveStorage(storage);
   try {
-    source?.setItem(PROGRESS_KEY, JSON.stringify(progress));
+    source?.setItem(PROGRESS_KEY, JSON.stringify({
+      ...progress,
+      version: CURRENT_PROGRESS_VERSION,
+      rulesetId: P5_STAGE_RULESET_ID,
+    }));
   } catch {
     // A full or private storage area must not stop a play session.
   }
@@ -334,6 +390,7 @@ export function updateP7Progress(progress: P7Progress, result: P7Result): P7Prog
   const better = isBetterRecord(result, previous);
   const record: P7StageRecord = {
     stageId: result.stageId,
+    rulesetId: P5_STAGE_RULESET_ID,
     mode,
     bestScore: better ? result.totalScore : previous?.bestScore ?? result.totalScore,
     bestGrade: better ? result.grade as Exclude<P7Grade, "未クリア"> : previous?.bestGrade ?? "C",
@@ -344,6 +401,8 @@ export function updateP7Progress(progress: P7Progress, result: P7Result): P7Prog
   };
   return {
     ...progress,
+    version: CURRENT_PROGRESS_VERSION,
+    rulesetId: P5_STAGE_RULESET_ID,
     completedStageIds,
     unlockedStageIds,
     records: {
@@ -360,4 +419,12 @@ export function getP7StageRecord(
   mode: P7RecordMode,
 ): P7StageRecord | null {
   return progress.records[stageId]?.[mode] ?? null;
+}
+
+export function getP7LegacyStageRecord(
+  progress: P7Progress,
+  stageId: P7StageId,
+  mode: P7RecordMode,
+): P7StageRecord | null {
+  return progress.legacy?.records[stageId]?.[mode] ?? null;
 }

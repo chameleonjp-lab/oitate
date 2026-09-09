@@ -53,6 +53,56 @@ test("records a completed stage and unlocks the next stage", async ({ page }) =>
   await expect(page.locator("#p7-stage-list [data-p7-stage='2']")).toBeEnabled();
 });
 
+test("shows objective-incomplete results without changing progression or records", async ({ page }) => {
+  await page.evaluate(() => window.__OITATE_P7__.e2e?.openStage(2));
+  const before = await getP7State(page);
+  await page.evaluate(() => window.__OITATE_P7__.e2e?.runObjectiveIncompleteReplay());
+
+  await expect(page.locator("#p7-result-overlay")).toBeVisible();
+  await expect(page.locator("#p7-result-title")).toContainText("条件が不足");
+  await expect(page.locator("#p7-result-title-text")).toContainText("不足");
+  const after = await getP7State(page);
+  expect(after.status).toBe("failed");
+  expect(after.failureReason).toBe("objectivesIncomplete");
+  expect(after.progress.completedStageIds).toEqual(before.progress.completedStageIds);
+  expect(after.progress.unlockedStageIds).toEqual(before.progress.unlockedStageIds);
+  expect(after.progress.records).toEqual(before.progress.records);
+});
+
+test("keeps legacy display and shows it beside a new current record after migration", async ({ page }) => {
+  const legacyPayload = {
+    version: 1,
+    completedStageIds: [1],
+    unlockedStageIds: [0, 1, 2],
+    records: {
+      1: { bestScore: 1_234, bestGrade: "B", bestTimeSeconds: 90, attempts: 2 },
+    },
+    fourthAnimalGate: "locked",
+  };
+  await page.evaluate((payload) => {
+    window.localStorage.setItem("oitate:p7:progress:v1", JSON.stringify(payload));
+  }, legacyPayload);
+  await page.reload();
+  await expect(page.locator("#p7-stage-menu-overlay")).toBeVisible();
+  await expect(page.locator("#p7-stage-list [data-p7-stage='1']")).toContainText("旧版クリア");
+
+  await page.locator("#p7-stage-list [data-p7-stage='1']").click();
+  await page.evaluate(() => window.__OITATE_P7__.e2e?.runCompletionReplay());
+  await expect(page.locator("#p7-result-overlay")).toBeVisible();
+  const state = await getP7State(page);
+  const currentScore = state.result?.totalScore;
+  expect(currentScore).toBeDefined();
+  const resultRecordText = page.locator("#p7-result-record");
+  await expect(resultRecordText).toContainText("1,234点");
+  await expect(resultRecordText).toContainText(`${currentScore?.toLocaleString("ja-JP")}点`);
+  await expect(resultRecordText).toContainText("旧版の参考記録");
+
+  await page.locator("[data-action='p7-select-stage']").click();
+  await expect(page.locator("#p7-stage-menu-overlay")).toBeVisible();
+  await expect(page.locator("#p7-stage-record-text")).toContainText("1,234点");
+  await expect(page.locator("#p7-stage-record-text")).toContainText(`${currentScore?.toLocaleString("ja-JP")}点`);
+});
+
 test("does not expose the P7 E2E hook on a production query", async ({ page }) => {
   await page.goto("/?p7=1");
   await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
